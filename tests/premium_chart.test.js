@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -55,5 +55,28 @@ describe('findHelperStudy', () => {
     const fakeGetChartApi = async () => 'window.fakeChart';
     const result = await findHelperStudy({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
     assert.equal(result, null);
+  });
+});
+
+describe('readHelperTable', () => {
+  it('reads MCP-VP table via data tools and parses', async () => {
+    const fakeRows = [
+      ['MCP_VP_v1', 'visible_range'],
+      ['poc', '100'],
+      ['vah', '110'],
+      ['val', '90'],
+      ['total_volume', '1000'],
+      ['va_pct', '0.7'],
+      ['rows', '1'],
+      ['100', '500'],
+    ];
+    const flatCells = fakeRows.flatMap((r, ri) => r.map((c, ci) => ({ id: `${ri}-${ci}`, raw: { row: ri, column: ci, text: c } })));
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('TV-MCP Helper')) return flatCells;
+      return null;
+    };
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await readHelperTable('MCP_VP_v1', { _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.poc, 100);
   });
 });
