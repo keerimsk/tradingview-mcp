@@ -11,6 +11,11 @@ function _resolve(deps) {
     evaluate: deps?.evaluate || _evaluate,
     evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
+    getInterval: deps?.getInterval || (async () => {
+      try {
+        return await _evaluate(`${CHART_API}._chartWidget.model().model().mainSeries().interval()`);
+      } catch { return null; }
+    }),
   };
 }
 
@@ -52,8 +57,13 @@ export async function setSymbol({ symbol, _deps }) {
   return { success: true, symbol, chart_ready: ready };
 }
 
+const TIMEFRAME_REGEX = /^(\d+S|\d+|D|W|M)$/;
+
 export async function setTimeframe({ timeframe, _deps }) {
-  const { evaluate, waitForChartReady } = _resolve(_deps);
+  const { evaluate, waitForChartReady, getInterval } = _resolve(_deps);
+  if (typeof timeframe !== 'string' || !TIMEFRAME_REGEX.test(timeframe)) {
+    throw new Error(`Invalid timeframe "${timeframe}". Use e.g. "1S", "5S", "1", "15", "60", "D", "W", "M".`);
+  }
   await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -61,6 +71,17 @@ export async function setTimeframe({ timeframe, _deps }) {
     })()
   `);
   const ready = await waitForChartReady(null, timeframe);
+  // Post-call verification — TV silently keeps old resolution if symbol does not support it.
+  const actual = await getInterval();
+  if (actual && actual !== timeframe) {
+    return {
+      success: false,
+      requested: timeframe,
+      actual,
+      chart_ready: ready,
+      error: `Symbol does not support ${timeframe} resolution. TV kept ${actual}. Try a higher timeframe.`,
+    };
+  }
   return { success: true, timeframe, chart_ready: ready };
 }
 
