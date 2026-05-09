@@ -173,6 +173,20 @@ export async function readHelperTable(expectedMagic, { _deps } = {}) {
   return parseMcpTable(sorted, expectedMagic);
 }
 
+/**
+ * Verify the TV-MCP Helper indicator is on the active chart. If absent, return
+ * structured manual-install instructions instead of attempting an automated
+ * paste — TradingView's Pine save dialog cannot be reliably driven via CDP
+ * (Ctrl+S overwrites whatever script slot is open, breaking user scripts;
+ * Save As dialog UI is brittle and version-dependent).
+ *
+ * One-time manual install:
+ *   1. Open Pine Editor in TradingView
+ *   2. New (script picker → New → Indicator)
+ *   3. Paste contents of `pine/mcp-helper.pine`
+ *   4. Save with name "TV-MCP Helper" (Save As dialog)
+ *   5. Add to chart
+ */
 export async function installHelper({ _deps } = {}) {
   const existing = await findHelperStudy({ _deps });
   if (existing) {
@@ -181,21 +195,25 @@ export async function installHelper({ _deps } = {}) {
 
   const here = dirname(fileURLToPath(import.meta.url));
   const pinePath = join(here, '..', '..', 'pine', 'mcp-helper.pine');
-  const source = await readFile(pinePath, 'utf-8');
+  // Read just to confirm the file exists; surface a clear error if the user
+  // removed it accidentally.
+  await readFile(pinePath, 'utf-8');
 
-  // pine.js: setSource({ source }), smartCompile() (no args), save() (no args — Ctrl+S)
-  // chart.js: manageIndicator({ action, indicator }) — parameter is 'indicator', not 'name'
-  await pineCore.setSource({ source });
-  await pineCore.smartCompile();
-  await pineCore.save();
-  await chartCore.manageIndicator({ action: 'add', indicator: HELPER_NAME });
-
-  await new Promise(r => setTimeout(r, 800));
-  const newId = await findHelperStudy({ _deps });
-  if (!newId) {
-    throw new Error('installHelper: helper indicator added but cannot be found on chart.');
-  }
-  return { success: true, action: 'installed', study_id: newId };
+  return {
+    success: false,
+    action: 'manual_install_required',
+    helper_name: HELPER_NAME,
+    pine_source_path: pinePath,
+    instructions: [
+      'Automated install was removed because Ctrl+S in Pine editor silently overwrites whatever script is currently open, risking user scripts.',
+      '1) Open Pine editor (chart toolbar → Pine icon).',
+      '2) Script picker (top-left of editor) → "New" → "Indicator".',
+      `3) Paste the full contents of ${pinePath} into the editor.`,
+      `4) Press Ctrl+S, set the name to exactly "${HELPER_NAME}" and save.`,
+      '5) Click "Add to chart" (or "Save and add to chart").',
+      '6) Re-run any vp_/tpo_ tool to verify.',
+    ],
+  };
 }
 
 const VP_VARIANTS = ['visible_range', 'fixed_range', 'session'];

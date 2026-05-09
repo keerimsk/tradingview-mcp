@@ -92,20 +92,28 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 
 ## Premium Chart Types (Ultimate plan only)
 
-For Volume Profile and TPO support, install the Pine helper indicator one time:
+For Volume Profile (`vp_*`) and TPO (`tpo_*`) tools, install the Pine helper indicator **manually** — automated install was removed because it risked overwriting your other saved Pine scripts.
 
-```bash
-node src/cli/index.js premium install-helper
-```
+**One-time manual install:**
 
-Or in Claude Code:
-> "Run premium_install_helper"
+1. Open Pine Editor in TradingView (chart toolbar → Pine icon).
+2. Click the script picker (top-left of editor) → **New** → **Indicator**.
+3. Paste the full contents of `pine/mcp-helper.pine` into the editor (replace the default template).
+4. Press `Ctrl+S`, set the name to exactly `TV-MCP Helper`, save.
+5. Click **Add to chart** (or **Save and add to chart**).
+6. Verify with `tv premium vp-add --variant visible_range && tv premium vp-get` — should return POC/VAH/VAL.
 
-This pastes `pine/mcp-helper.pine` into your Pine editor, compiles it, saves it as `TV-MCP Helper`, and adds it to your chart. The helper emits Volume Profile and TPO data as a table that the MCP server reads.
+`tv premium install-helper` (or the `premium_install_helper` MCP tool) checks whether the helper is already on chart; if not, it returns these manual instructions.
 
-**Manual fallback:** if the bootstrap fails (Pine compile error, etc.), open `pine/mcp-helper.pine`, copy contents, paste into the Pine editor in TradingView, save as `TV-MCP Helper`, add to chart.
+**Cleanup:** to remove, use `vp_remove` MCP tool or remove `TV-MCP Helper` from the chart's indicators panel.
 
-**Cleanup:** to remove, use `vp_remove` MCP tool or remove `TV-MCP Helper` indicator manually.
+**Tools that need the helper:** `vp_add`, `vp_get`, `vp_remove`, `tpo_add`, `tpo_get`. Other premium tools (`patterns_*`, `footprint_toggle`) work without the helper.
+
+### Known limitations
+
+- **`bar_magnifier_toggle`** — TradingView's Bar Magnifier setting is UI-only on Premium/Ultimate; its toggle state is not exposed in the CDP-accessible property tree. Use the Chart Settings dialog manually if needed.
+- **Harmonic Patterns** — `patterns_add --kinds harmonic` uses an unverified scriptIdPart guess. May fail until probed live.
+- **`VolumeFootprint` chart type** — works on Premium/Ultimate (ID 17). On lower-tier plans `footprint_toggle --enable true` will silently fail.
 
 ## Troubleshooting
 
