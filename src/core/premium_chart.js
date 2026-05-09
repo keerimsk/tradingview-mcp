@@ -395,3 +395,46 @@ export async function footprintToggle({ enable = true, _deps } = {}) {
     return { success: true, current_type: target, previous_type: FOOTPRINT_TYPE_NAME };
   }
 }
+
+// ── Task 5.2: barMagnifierToggle ─────────────────────────────────────────────
+
+export async function barMagnifierToggle({ enable = true, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  const ok = await evaluate(`
+    (function() {
+      try {
+        var api = ${apiPath};
+        var ms = api._chartWidget.model().mainSeries();
+        var props = ms.properties().childs();
+        var keys = Object.keys(props);
+        for (var i = 0; i < keys.length; i++) {
+          var k = keys[i];
+          if (k.toLowerCase().indexOf('barmagnifier') !== -1 || k.toLowerCase().indexOf('bar_magnifier') !== -1) {
+            try { props[k].setValue(${enable ? 'true' : 'false'}); return true; } catch(e) {}
+          }
+        }
+        function walk(node, depth) {
+          if (depth > 4 || !node || typeof node !== 'object') return false;
+          try {
+            var c = typeof node.childs === 'function' ? node.childs() : null;
+            if (!c) return false;
+            var ks = Object.keys(c);
+            for (var j = 0; j < ks.length; j++) {
+              if (ks[j].toLowerCase().indexOf('barmagnifier') !== -1) {
+                try { c[ks[j]].setValue(${enable ? 'true' : 'false'}); return true; } catch(e) {}
+              }
+              if (walk(c[ks[j]], depth + 1)) return true;
+            }
+          } catch(e) {}
+          return false;
+        }
+        return walk(ms.properties(), 0);
+      } catch(e) { return false; }
+    })()
+  `);
+  if (!ok) {
+    throw new Error('Bar Magnifier property not found in chart settings (TradingView UI may have changed).');
+  }
+  return { success: true, enabled: !!enable };
+}

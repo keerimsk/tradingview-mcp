@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet, footprintToggle } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet, footprintToggle, barMagnifierToggle } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -325,5 +325,18 @@ describe('footprintToggle', () => {
       _deps: { setType: fakeSetType, getChartState: fakeGetState, evaluate: async () => null, getChartApi: async () => 'x' },
     });
     assert.equal(result.current_type, 'Candles');
+  });
+});
+
+describe('barMagnifierToggle', () => {
+  it('returns success with enabled=true when toggled on', async () => {
+    const fakeEvaluate = async () => true;
+    const fakeGetChartApi = async () => 'x';
+    const result = await barMagnifierToggle({
+      enable: true,
+      _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.enabled, true);
   });
 });
