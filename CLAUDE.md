@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+88 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -73,6 +73,30 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `alert_list` → view active alerts
 - `alert_delete` → remove alerts
 
+### "Premium chart features (Volume Profile, TPO, patterns)"
+
+**Setup (one-time per session if helper not installed):**
+- `premium_install_helper` → installs `TV-MCP Helper` Pine indicator
+
+**Volume Profile workflow:**
+1. `vp_add` with `variant: "visible_range"` (or `"fixed_range"`/`"session"`) → configures helper
+2. `vp_get` → returns POC, VAH, VAL, value_area_pct, bins (price/volume pairs)
+3. `vp_remove` → cleanup
+
+**Auto-pattern detection:**
+1. `patterns_add` with `kinds: ["candlestick", "harmonic", "auto_fib"]` → adds built-in studies
+2. `patterns_list` → returns `[{kind, name, price, bar_time}, ...]` for each detected pattern
+
+**TPO (Market Profile):**
+1. `tpo_add` with `period_min: 30, session: "RTH"`
+2. `tpo_get` → letter_rows, value_area, initial_balance, single_prints
+
+**Chart type / settings toggles:**
+- `footprint_toggle { enable: true }` → Volume Footprint chart type (revert with `enable: false`)
+- `bar_magnifier_toggle { enable: true }` → Bar Magnifier setting
+
+**Important:** `vp_get`/`tpo_get` require the helper to be installed first. If they error with "TV-MCP Helper not found", call `premium_install_helper` once.
+
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading
 - `ui_click` → click buttons by aria-label, text, or data-name
@@ -109,6 +133,9 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
+| `vp_get` | ~2-4 KB (depends on `bins_limit`) |
+| `tpo_get` | ~2-5 KB (depends on level count) |
+| `patterns_list` | ~1-3 KB |
 
 ## Tool Conventions
 
