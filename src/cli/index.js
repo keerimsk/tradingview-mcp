@@ -5,7 +5,7 @@
  * Outputs JSON to stdout. Errors to stderr.
  * Exit codes: 0 success, 1 error, 2 connection failure.
  *
- * All 88 MCP tools are accessible via CLI commands.
+ * All 89 MCP tools are accessible via CLI commands.
  * Pipe-friendly: every command outputs JSON for use with jq.
  */
 
@@ -26,6 +26,7 @@ import './commands/pane.js';
 import './commands/tab.js';
 import './commands/stream.js';
 import './commands/premium.js';
+import './commands/ticks.js';
 
 // Run
 import { run } from './router.js';
