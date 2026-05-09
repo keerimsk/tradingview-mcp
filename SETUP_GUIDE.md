@@ -115,6 +115,16 @@ For Volume Profile (`vp_*`) and TPO (`tpo_*`) tools, install the Pine helper ind
 - **Harmonic Patterns** — `patterns_add --kinds harmonic` uses an unverified scriptIdPart guess. May fail until probed live.
 - **`VolumeFootprint` chart type** — works on Premium/Ultimate (ID 17). On lower-tier plans `footprint_toggle --enable true` will silently fail.
 
+## Tick Data (Premium / Ultimate plans)
+
+For `data_get_ticks` to work, TradingView's Time & Sales panel must be available. On Premium/Ultimate plans this panel is included; on lower tiers it may be locked.
+
+**One-time:** open the Time & Sales panel from TradingView's right sidebar (look for the bid/ask/last icon). The MCP server attempts auto-open before each call but will return `{success:false, error:"Time & Sales panel could not be opened"}` if the click fails.
+
+**Sub-minute resolutions** (`chart_set_timeframe` with `"1S"`, `"5S"`, `"30S"`) require the symbol to support seconds-based intervals. Crypto exchanges (BINANCE, COINBASE) generally do; equities and forex usually do not.
+
+**40,000-bar history** is fetched lazily — `data_get_ohlcv` with high `count` triggers TradingView to load older data. Some symbols may have shorter histories; in that case the tool returns `partial: true` with `returned < requested`.
+
 ## Troubleshooting
 
 | Problem | Solution |
