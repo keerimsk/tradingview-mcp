@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as pineCore from './pine.js';
 import * as chartCore from './chart.js';
+import * as indicatorCore from './indicators.js';
 
 export const MAGIC_VP  = 'MCP_VP_v1';
 export const MAGIC_TPO = 'MCP_TPO_v1';
@@ -24,6 +25,8 @@ function _resolve(deps) {
   return {
     evaluate: deps?.evaluate || _evaluate,
     getChartApi: deps?.getChartApi || _getChartApi,
+    setInputs: deps?.setInputs || indicatorCore.setInputs,
+    manageIndicator: deps?.manageIndicator || chartCore.manageIndicator,
   };
 }
 
@@ -188,4 +191,31 @@ export async function installHelper({ _deps } = {}) {
     throw new Error('installHelper: helper indicator added but cannot be found on chart.');
   }
   return { success: true, action: 'installed', study_id: newId };
+}
+
+const VP_VARIANTS = ['visible_range', 'fixed_range', 'session'];
+
+export async function vpAdd({ variant = 'visible_range', rows = 24, va_pct = 0.7, _deps } = {}) {
+  if (!VP_VARIANTS.includes(variant)) {
+    throw new Error(`vpAdd: invalid variant "${variant}". Must be one of ${VP_VARIANTS.join(', ')}.`);
+  }
+  if (!Number.isInteger(rows) || rows < 4 || rows > 200) {
+    throw new Error(`vpAdd: rows must be integer 4..200, got ${rows}`);
+  }
+  if (typeof va_pct !== 'number' || va_pct < 0.1 || va_pct > 0.99) {
+    throw new Error(`vpAdd: va_pct must be number 0.1..0.99, got ${va_pct}`);
+  }
+
+  const { setInputs } = _resolve(_deps);
+  const studyId = await findHelperStudy({ _deps });
+  if (!studyId) {
+    throw new Error(`${HELPER_NAME} not found. Run 'tv premium install-helper' first.`);
+  }
+
+  await setInputs({
+    entity_id: studyId,
+    inputs: { mode: 'vp', vp_variant: variant, vp_rows: rows, vp_va_pct: va_pct },
+  });
+
+  return { success: true, study_id: studyId, variant, rows, va_pct };
 }

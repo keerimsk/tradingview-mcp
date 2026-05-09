@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -78,5 +78,39 @@ describe('readHelperTable', () => {
     const fakeGetChartApi = async () => 'window.fakeChart';
     const result = await readHelperTable('MCP_VP_v1', { _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
     assert.equal(result.poc, 100);
+  });
+});
+
+describe('vpAdd', () => {
+  it('returns success with study_id when helper installed', async () => {
+    const setInputsCalls = [];
+    const fakeSetInputs = async (args) => { setInputsCalls.push(args); return { success: true }; };
+    const fakeEvaluate = async () => ([{ id: 'st_helper', name: 'TV-MCP Helper' }]);
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await vpAdd({
+      variant: 'visible_range', rows: 24, va_pct: 0.7,
+      _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi, setInputs: fakeSetInputs },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.variant, 'visible_range');
+    assert.equal(result.study_id, 'st_helper');
+    assert.equal(setInputsCalls.length, 1);
+    assert.equal(setInputsCalls[0].inputs.mode, 'vp');
+  });
+
+  it('errors when helper not installed', async () => {
+    const fakeEvaluate = async () => ([]);
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    await assert.rejects(
+      () => vpAdd({ variant: 'visible_range', _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi, setInputs: async () => ({}) } }),
+      /not found/i
+    );
+  });
+
+  it('rejects invalid variant', async () => {
+    await assert.rejects(
+      () => vpAdd({ variant: 'bad_value' }),
+      /variant/i
+    );
   });
 });
