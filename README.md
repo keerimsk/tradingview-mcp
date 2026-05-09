@@ -218,8 +218,11 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Show me detected candlestick patterns" | `patterns_add` → `patterns_list` |
 | "Read the TPO profile" | `tpo_add` → `tpo_get` |
 | "Switch to footprint" | `footprint_toggle` |
+| "Show me last 50 ticks" | `data_get_ticks` |
+| "Switch to 5-second bars" | `chart_set_timeframe` with `"5S"` |
+| "Get me 10000 daily bars" | `data_get_ohlcv` with `count: 10000` |
 
-## Tool Reference (88 MCP tools)
+## Tool Reference (89 MCP tools)
 
 ### Chart Reading
 
@@ -228,7 +231,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | `chart_get_state` | First call — get symbol, timeframe, all indicator names + IDs | ~500B |
 | `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators | ~500B |
 | `quote_get` | Get latest price, OHLC, volume | ~200B |
-| `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
+| `data_get_ohlcv` | Get price bars (up to 40,000). **Use `summary: true`** for compact stats. Triggers history load if requested count exceeds chart cache. | 500B (summary) / 8KB (100 bars) |
 
 ### Custom Indicator Data (Pine Drawings)
 
@@ -248,7 +251,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | What it does |
 |------|-------------|
 | `chart_set_symbol` | Change ticker (BTCUSD, AAPL, ES1!, NYMEX:CL1!) |
-| `chart_set_timeframe` | Change resolution (1, 5, 15, 60, D, W, M) |
+| `chart_set_timeframe` | Change resolution. Accepts seconds (`1S`, `5S`, `30S`), minutes (`1`, `15`, `60`), `D`, `W`, `M`. Symbol must support requested resolution. |
 | `chart_set_type` | Change style (Candles, HeikinAshi, Line, Area, Renko) |
 | `chart_manage_indicator` | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
 | `chart_scroll_to_date` | Jump to a date (ISO: "2025-01-15") |
@@ -324,6 +327,12 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `footprint_toggle` | Toggle Volume Footprint chart type |
 | `bar_magnifier_toggle` | Toggle Bar Magnifier setting |
 
+### Tick Data (Premium / Ultimate)
+
+| Tool | What it does |
+|------|-------------|
+| `data_get_ticks` | Read recent tick prints from Time & Sales panel (price, size, side, time). Requires panel to be openable. |
+
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
@@ -366,7 +375,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (88 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (89 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
