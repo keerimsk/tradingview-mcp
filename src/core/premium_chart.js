@@ -267,3 +267,70 @@ export async function patternsAdd({ kinds = [], _deps } = {}) {
   }
   return { success: true, added };
 }
+
+const STUDY_NAME_TO_KIND = Object.fromEntries(
+  Object.entries(PATTERN_STUDY_NAMES).map(([k, v]) => [v, k])
+);
+
+export async function patternsList({ kinds, max_per_kind = 25, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+
+  const allowedNames = (kinds && kinds.length > 0)
+    ? kinds.map(k => PATTERN_STUDY_NAMES[k]).filter(Boolean)
+    : Object.values(PATTERN_STUDY_NAMES);
+
+  const studiesWithLabels = await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var widget = api._chartWidget;
+      var sources = widget.model().model().dataSources();
+      var allowed = ${JSON.stringify(allowedNames)};
+      var out = [];
+      for (var si = 0; si < sources.length; si++) {
+        var s = sources[si];
+        if (!s.metaInfo) continue;
+        try {
+          var meta = s.metaInfo();
+          var name = meta.description || meta.shortDescription || '';
+          if (allowed.indexOf(name) === -1) continue;
+          var g = s._graphics;
+          if (!g || !g._primitivesCollection) continue;
+          var pc = g._primitivesCollection;
+          var lblOuter = pc.dwglabels;
+          if (!lblOuter) continue;
+          var lblColl = lblOuter.get('labels');
+          if (!lblColl) continue;
+          var inner = lblColl.get(false);
+          if (!inner || !inner._primitivesDataById) continue;
+          var items = [];
+          inner._primitivesDataById.forEach(function(v, id) { items.push({ id: id, raw: v }); });
+          if (items.length > 0) out.push({ name: name, items: items });
+        } catch(e) {}
+      }
+      return out;
+    })()
+  `);
+
+  const patterns = [];
+  for (const st of (studiesWithLabels || [])) {
+    if (!allowedNames.includes(st.name)) continue;
+    const kind = STUDY_NAME_TO_KIND[st.name];
+    const cap = Math.max(1, Math.min(200, max_per_kind));
+    const items = (st.items || []).slice(0, cap);
+    for (const item of items) {
+      const text  = item.raw?.text ?? item.raw?.label ?? '';
+      const point = item.raw?.points?.[0] ?? item.raw?.point ?? {};
+      const price = Number(point.price);
+      const time  = Number(point.time);
+      patterns.push({
+        kind,
+        name: String(text || '').trim(),
+        price: Number.isFinite(price) ? price : null,
+        bar_time: Number.isFinite(time) ? new Date(time * 1000).toISOString() : null,
+      });
+    }
+  }
+
+  return { success: true, patterns };
+}

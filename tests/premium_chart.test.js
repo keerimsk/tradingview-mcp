@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -201,5 +201,42 @@ describe('patternsAdd', () => {
   it('rejects empty or invalid kinds', async () => {
     await assert.rejects(() => patternsAdd({ kinds: [] }), /at least one/i);
     await assert.rejects(() => patternsAdd({ kinds: ['bogus'] }), /unknown kind/i);
+  });
+});
+
+describe('patternsList', () => {
+  it('returns parsed patterns with kind, name, price, bar_time', async () => {
+    const fakeEvaluate = async (expr) => {
+      return [
+        { name: 'All Candlestick Patterns', items: [
+          { id: 'l1', raw: { text: 'Bullish Engulfing', points: [{ price: 24512.5, time: 1715260200 }] } },
+        ]},
+        { name: 'Harmonic Patterns', items: [
+          { id: 'l2', raw: { text: 'Bullish Gartley', points: [{ price: 24470.0, time: 1715253000 }] } },
+        ]},
+      ];
+    };
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await patternsList({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.success, true);
+    assert.equal(result.patterns.length, 2);
+    assert.equal(result.patterns[0].kind, 'candlestick');
+    assert.equal(result.patterns[0].name, 'Bullish Engulfing');
+    assert.equal(result.patterns[1].kind, 'harmonic');
+  });
+
+  it('filters by kinds', async () => {
+    const fakeEvaluate = async () => [
+      { name: 'All Candlestick Patterns', items: [
+        { id: 'l1', raw: { text: 'Doji', points: [{ price: 100, time: 1 }] } },
+      ]},
+      { name: 'Harmonic Patterns', items: [
+        { id: 'l2', raw: { text: 'Bat', points: [{ price: 200, time: 2 }] } },
+      ]},
+    ];
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await patternsList({ kinds: ['harmonic'], _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.patterns.length, 1);
+    assert.equal(result.patterns[0].kind, 'harmonic');
   });
 });
