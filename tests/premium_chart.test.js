@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -238,5 +238,29 @@ describe('patternsList', () => {
     const result = await patternsList({ kinds: ['harmonic'], _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
     assert.equal(result.patterns.length, 1);
     assert.equal(result.patterns[0].kind, 'harmonic');
+  });
+});
+
+describe('tpoAdd', () => {
+  it('configures helper for TPO mode', async () => {
+    const calls = [];
+    const fakeSetInputs = async (args) => { calls.push(args); return { success: true }; };
+    const fakeEvaluate = async () => ([{ id: 'st_helper', name: 'TV-MCP Helper' }]);
+    const fakeGetChartApi = async () => 'x';
+    const result = await tpoAdd({
+      period_min: 30, session: 'RTH', va_pct: 0.7,
+      _deps: { setInputs: fakeSetInputs, evaluate: fakeEvaluate, getChartApi: fakeGetChartApi },
+    });
+    assert.equal(result.success, true);
+    assert.equal(calls[0].inputs.mode, 'tpo');
+    assert.equal(calls[0].inputs.tpo_period, 30);
+  });
+
+  it('rejects invalid period_min', async () => {
+    await assert.rejects(() => tpoAdd({ period_min: 0 }), /period/i);
+  });
+
+  it('rejects invalid session', async () => {
+    await assert.rejects(() => tpoAdd({ period_min: 30, session: 'BAD' }), /session/i);
   });
 });

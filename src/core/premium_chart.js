@@ -23,9 +23,9 @@ export const HELPER_NAME = 'TV-MCP Helper';
 
 function _resolve(deps) {
   return {
-    evaluate: deps?.evaluate || _evaluate,
-    getChartApi: deps?.getChartApi || _getChartApi,
-    setInputs: deps?.setInputs || indicatorCore.setInputs,
+    evaluate:        deps?.evaluate        || _evaluate,
+    getChartApi:     deps?.getChartApi     || _getChartApi,
+    setInputs:       deps?.setInputs       || indicatorCore.setInputs,
     manageIndicator: deps?.manageIndicator || chartCore.manageIndicator,
   };
 }
@@ -333,4 +333,27 @@ export async function patternsList({ kinds, max_per_kind = 25, _deps } = {}) {
   }
 
   return { success: true, patterns };
+}
+
+// ── Task 4.1: tpoAdd ─────────────────────────────────────────────────────────
+
+export async function tpoAdd({ period_min = 30, session = 'RTH', va_pct = 0.7, _deps } = {}) {
+  if (!Number.isInteger(period_min) || period_min < 1 || period_min > 240) {
+    throw new Error(`tpoAdd: period_min must be 1..240, got ${period_min}`);
+  }
+  if (!['RTH', 'ETH'].includes(session)) {
+    throw new Error(`tpoAdd: session must be 'RTH' or 'ETH', got "${session}"`);
+  }
+  if (typeof va_pct !== 'number' || va_pct < 0.1 || va_pct > 0.99) {
+    throw new Error(`tpoAdd: va_pct must be 0.1..0.99, got ${va_pct}`);
+  }
+
+  const { setInputs } = _resolve(_deps);
+  const studyId = await findHelperStudy({ _deps });
+  if (!studyId) throw new Error(`${HELPER_NAME} not found. Run 'tv premium install-helper' first.`);
+  await setInputs({
+    entity_id: studyId,
+    inputs: { mode: 'tpo', tpo_period: period_min, tpo_session: session, tpo_va_pct: va_pct },
+  });
+  return { success: true, study_id: studyId, period_min, session, va_pct };
 }
