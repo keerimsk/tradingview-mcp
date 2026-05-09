@@ -66,14 +66,19 @@ export async function setTimeframe({ timeframe, _deps }) {
 
 export async function setType({ chart_type, _deps }) {
   const { evaluate } = _resolve(_deps);
+  // Numeric chart-type IDs verified live against TradingView Desktop. Premium
+  // chart types (VolumeFootprint=17, TPO, SVP, VolumeCandles) are exposed via
+  // mainSeries.style() — see properties childs() for tpoStyle/svpStyle/volFootprintStyle/volCandlesStyle.
+  // Standard 0-9 cover the free-tier set; 10+ are Premium/Ultimate.
   const typeMap = {
     'Bars': 0, 'Candles': 1, 'Line': 2, 'Area': 3,
     'Renko': 4, 'Kagi': 5, 'PointAndFigure': 6, 'LineBreak': 7,
     'HeikinAshi': 8, 'HollowCandles': 9,
+    'VolumeFootprint': 17,
   };
   const typeNum = typeMap[chart_type] ?? Number(chart_type);
-  if (isNaN(typeNum) || typeNum < 0 || typeNum > 9 || !Number.isInteger(typeNum)) {
-    throw new Error(`Unknown chart type: ${chart_type}. Use a name (Candles, Line, etc.) or number (0-9).`);
+  if (isNaN(typeNum) || typeNum < 0 || typeNum > 50 || !Number.isInteger(typeNum)) {
+    throw new Error(`Unknown chart type: ${chart_type}. Use a known name or numeric ID (0-50).`);
   }
   await evaluate(`
     (function() {
