@@ -82,3 +82,28 @@ export function parseMcpTable(rows, expectedMagic) {
 
   throw new Error(`parseMcpTable: unsupported magic "${expectedMagic}"`);
 }
+
+export async function findHelperStudy({ _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  const studies = await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var widget = api._chartWidget;
+      var sources = widget.model().model().dataSources();
+      var out = [];
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
+        if (!s.metaInfo) continue;
+        try {
+          var meta = s.metaInfo();
+          var nm = meta.description || meta.shortDescription || '';
+          out.push({ id: s.id ? s.id() : null, name: nm });
+        } catch(e) {}
+      }
+      return out;
+    })()
+  `);
+  const found = (studies || []).find(s => s.name === HELPER_NAME);
+  return found ? found.id : null;
+}

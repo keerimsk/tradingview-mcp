@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -36,5 +36,24 @@ describe('parseMcpTable — Volume Profile', () => {
 
   it('rejects empty table', () => {
     assert.throws(() => parseMcpTable([], MAGIC_VP), /empty/i);
+  });
+});
+
+describe('findHelperStudy', () => {
+  it('returns study id when helper present', async () => {
+    const fakeEvaluate = async () => ([
+      { name: 'EMA', id: 'st_001' },
+      { name: 'TV-MCP Helper', id: 'st_042' },
+    ]);
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await findHelperStudy({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result, 'st_042');
+  });
+
+  it('returns null when helper absent', async () => {
+    const fakeEvaluate = async () => ([{ name: 'EMA', id: 'st_001' }]);
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await findHelperStudy({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result, null);
   });
 });
