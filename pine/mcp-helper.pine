@@ -108,68 +108,75 @@ if barstate.islast
             table.cell(t, 0, 7 + r, str.tostring(array.get(bprices, r), "#.##########"))
             table.cell(t, 1, 7 + r, str.tostring(array.get(bvols,    r), "#.##"))
     else
-        // TPO: each bracket within the current session = a letter (A,B,C,...).
-        // For every price level (1 tick increment), record which letters touched it.
-        // Output: for each row (price level), the concatenated letters.
+        // TPO v2: session-agnostic. Take last N bars (vp_lookback), divide into
+        // up to 26 equal brackets sized by tpo_period, label each A..Z. For each
+        // price level (max 100 levels across the range), append the letters of
+        // every bracket whose [bar_low, bar_high] touched that level.
+        // Works on crypto/forex/futures uniformly — no session detection.
 
-        int bracket_ms = tpo_period * 60 * 1000
-        bool is_new_session = ta.change(time("D")) != 0
+        // How many bars per bracket given timeframe + period_min?
+        float tf_seconds = timeframe.in_seconds(timeframe.period)
+        int bracket_bars = math.max(1, int(math.round(tpo_period * 60.0 / tf_seconds)))
 
-        // Count brackets per session — assumes session starts at 09:30 RTH or 00:00 ETH.
-        int session_start_idx = ta.valuewhen(is_new_session, bar_index, 0)
-        int bars_in_session = bar_index - session_start_idx + 1
+        int max_brackets = 26
+        int n_brackets = math.min(max_brackets, math.max(1, vp_lookback / bracket_bars))
+        int total_bars = n_brackets * bracket_bars
 
-        // Determine session high/low.
-        float s_high = ta.highest(high, bars_in_session)
-        float s_low  = ta.lowest(low,   bars_in_session)
-        float tick   = syminfo.mintick > 0 ? syminfo.mintick : (s_high - s_low) / 50.0
-        int   levels = int(math.min(200.0, math.round((s_high - s_low) / tick) + 1))
-        levels := math.max(levels, 4)
-        float lvl_step = (s_high - s_low) / (levels - 1)
+        // Range over the analysis window.
+        float w_low  = ta.lowest(low,  total_bars)
+        float w_high = ta.highest(high, total_bars)
+        int   max_levels = 100
+        float lvl_step = (w_high - w_low) / (max_levels - 1)
 
-        // For each price level, collect letters as ASCII string.
-        var string[] letter_rows = array.new_string(200, "")
-        for i = 0 to 199
+        // Reset letter_rows on the last bar (var carries across bars; we always
+        // recompute on barstate.islast so a fresh array is fine).
+        var string[] letter_rows = array.new_string(100, "")
+        for i = 0 to 99
             array.set(letter_rows, i, "")
 
-        // Iterate each bar in session, assign to bracket index, mark touched levels.
-        for j = 0 to bars_in_session - 1
-            int bar_time = int(time[j])
-            int session_open_time = int(time[bars_in_session - 1])
-            int bracket_idx = int(math.floor((bar_time - session_open_time) / bracket_ms))
-            bracket_idx := math.max(0, math.min(25, bracket_idx))
-            string ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            string letter = str.substring(ALPHABET, bracket_idx, bracket_idx + 1)
+        string ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-            float bar_low  = low[j]
-            float bar_high = high[j]
-            for lvl = 0 to levels - 1
-                float p = s_low + lvl_step * lvl
-                if p >= bar_low and p <= bar_high
+        // For each bracket b (0=oldest, n_brackets-1=newest), find its high/low
+        // and mark every level it touches with letter b.
+        for b = 0 to n_brackets - 1
+            // Bracket b spans bar offsets [start_off..end_off] from the latest bar.
+            // newest bracket (b = n_brackets-1) is offsets [0..bracket_bars-1].
+            int start_off = (n_brackets - 1 - b) * bracket_bars
+            int end_off   = start_off + bracket_bars - 1
+            float br_low  = low[start_off]
+            float br_high = high[start_off]
+            for o = start_off to end_off
+                if low[o] < br_low
+                    br_low := low[o]
+                if high[o] > br_high
+                    br_high := high[o]
+            string letter = str.substring(ALPHABET, b, b + 1)
+            for lvl = 0 to max_levels - 1
+                float p = w_low + lvl_step * lvl
+                if p >= br_low and p <= br_high
                     string existing = array.get(letter_rows, lvl)
                     if str.contains(existing, letter) == false
                         array.set(letter_rows, lvl, existing + letter)
 
-        // Compute POC = level with most letters; VA = expand from POC by total letter count.
+        // POC = level with most letters
         int poc_lvl = 0
         int poc_count = 0
-        for lvl2 = 0 to levels - 1
+        int total_letters = 0
+        for lvl2 = 0 to max_levels - 1
             int c = str.length(array.get(letter_rows, lvl2))
+            total_letters += c
             if c > poc_count
                 poc_count := c
                 poc_lvl := lvl2
 
-        int total_letters = 0
-        for lvl3 = 0 to levels - 1
-            total_letters += str.length(array.get(letter_rows, lvl3))
-
+        // Value Area: expand from POC until va_pct of total letters
         int va_target_lt = int(math.round(total_letters * tpo_va_pct))
         int va_running_lt = poc_count
         int va_lo = poc_lvl
         int va_hi = poc_lvl
-        while va_running_lt < va_target_lt and (va_lo > 0 or va_hi < levels - 1)
-            int lo_n = va_lo > 0          ? str.length(array.get(letter_rows, va_lo - 1)) : -1
-            int hi_n = va_hi < levels - 1 ? str.length(array.get(letter_rows, va_hi + 1)) : -1
+        while va_running_lt < va_target_lt and (va_lo > 0 or va_hi < max_levels - 1)
+            int lo_n = va_lo > 0              ? str.length(array.get(letter_rows, va_lo - 1)) : -1
+            int hi_n = va_hi < max_levels - 1 ? str.length(array.get(letter_rows, va_hi + 1)) : -1
             if lo_n < 0 and hi_n < 0
                 break
             if lo_n >= hi_n
@@ -179,20 +186,21 @@ if barstate.islast
                 va_hi  += 1
                 va_running_lt += hi_n
 
-        float poc_price_t = s_low + lvl_step * poc_lvl
-        float vah_t       = s_low + lvl_step * va_hi
-        float val_t       = s_low + lvl_step * va_lo
+        float poc_price_t = w_low + lvl_step * poc_lvl
+        float vah_t       = w_low + lvl_step * va_hi
+        float val_t       = w_low + lvl_step * va_lo
 
-        // Initial Balance = first 2 brackets (60 min RTH default).
-        float ib_high = s_low
-        float ib_low  = s_high
-        for j2 = 0 to bars_in_session - 1
-            int bar_time2 = int(time[j2])
-            int session_open_time2 = int(time[bars_in_session - 1])
-            int b_idx = int(math.floor((bar_time2 - session_open_time2) / bracket_ms))
-            if b_idx <= 1
-                ib_high := math.max(ib_high, high[j2])
-                ib_low  := math.min(ib_low,  low[j2])
+        // Initial Balance = first 2 brackets (oldest in our window)
+        int ib_bars = math.min(total_bars, bracket_bars * 2)
+        int ib_start = total_bars - 1
+        int ib_end   = total_bars - ib_bars
+        float ib_high = low[ib_start]
+        float ib_low  = high[ib_start]
+        for o2 = ib_end to ib_start
+            if low[o2] < ib_low
+                ib_low := low[o2]
+            if high[o2] > ib_high
+                ib_high := high[o2]
 
         // Emit: header + summary + letter rows.
         table.cell(t, 0, 0, "MCP_TPO_v1")
@@ -210,8 +218,8 @@ if barstate.islast
         table.cell(t, 0, 6, "ib_low")
         table.cell(t, 1, 6, str.tostring(ib_low, "#.##########"))
         table.cell(t, 0, 7, "levels")
-        table.cell(t, 1, 7, str.tostring(levels))
-        for lvl4 = 0 to levels - 1
-            float p_emit = s_low + lvl_step * lvl4
+        table.cell(t, 1, 7, str.tostring(max_levels))
+        for lvl4 = 0 to max_levels - 1
+            float p_emit = w_low + lvl_step * lvl4
             table.cell(t, 0, 8 + lvl4, str.tostring(p_emit, "#.##########"))
             table.cell(t, 1, 8 + lvl4, array.get(letter_rows, lvl4))
