@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -112,5 +112,45 @@ describe('vpAdd', () => {
       () => vpAdd({ variant: 'bad_value' }),
       /variant/i
     );
+  });
+});
+
+describe('vpGet', () => {
+  it('returns parsed VP struct with bins', async () => {
+    const flatCells = [
+      ['MCP_VP_v1', 'visible_range'],
+      ['poc', '24530.5'],
+      ['vah', '24580.25'],
+      ['val', '24470.0'],
+      ['total_volume', '245800.0'],
+      ['va_pct', '0.7'],
+      ['rows', '2'],
+      ['24580.0', '12450.0'],
+      ['24470.0', '18200.0'],
+    ].flatMap((cols, r) => cols.map((text, c) => ({ id: `${r}-${c}`, raw: { row: r, column: c, text } })));
+
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('TV-MCP Helper')) return flatCells;
+      return null;
+    };
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await vpGet({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.success, true);
+    assert.equal(result.poc, 24530.5);
+    assert.equal(result.bins.length, 2);
+  });
+
+  it('caps bins via bins_limit', async () => {
+    const rows = [
+      ['MCP_VP_v1', 'visible_range'],
+      ['poc', '100'], ['vah', '110'], ['val', '90'],
+      ['total_volume', '1000'], ['va_pct', '0.7'], ['rows', '5'],
+      ['100', '1'], ['101', '2'], ['102', '3'], ['103', '4'], ['104', '5'],
+    ];
+    const flatCells = rows.flatMap((cols, r) => cols.map((text, c) => ({ id: `${r}-${c}`, raw: { row: r, column: c, text } })));
+    const fakeEvaluate = async () => flatCells;
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await vpGet({ bins_limit: 3, _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.bins.length, 3);
   });
 });

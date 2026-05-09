@@ -219,3 +219,18 @@ export async function vpAdd({ variant = 'visible_range', rows = 24, va_pct = 0.7
 
   return { success: true, study_id: studyId, variant, rows, va_pct };
 }
+
+export async function vpGet({ bins_limit = 100, _deps } = {}) {
+  const parsed = await readHelperTable(MAGIC_VP, { _deps });
+  const bins = parsed.bins.slice(0, Math.max(1, Math.min(500, bins_limit)));
+  return {
+    success: true,
+    variant: parsed.variant,
+    poc: parsed.poc,
+    vah: parsed.vah,
+    val: parsed.val,
+    value_area_pct: parsed.value_area_pct,
+    total_volume: parsed.total_volume,
+    bins,
+  };
+}
