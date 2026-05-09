@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -262,5 +262,36 @@ describe('tpoAdd', () => {
 
   it('rejects invalid session', async () => {
     await assert.rejects(() => tpoAdd({ period_min: 30, session: 'BAD' }), /session/i);
+  });
+});
+
+describe('tpoGet', () => {
+  it('returns parsed TPO struct with letter rows + IB + value area', async () => {
+    const rows = [
+      ['MCP_TPO_v1', 'RTH'],
+      ['period_min', '30'],
+      ['poc', '24530'],
+      ['vah', '24580'],
+      ['val', '24470'],
+      ['ib_high', '24580'],
+      ['ib_low', '24500'],
+      ['levels', '3'],
+      ['24580', 'ABCD'],
+      ['24530', 'ABCDEF'],
+      ['24470', 'A'],
+    ];
+    const flatCells = rows.flatMap((cols, r) => cols.map((text, c) => ({ id: `${r}-${c}`, raw: { row: r, column: c, text } })));
+    const fakeEvaluate = async () => flatCells;
+    const fakeGetChartApi = async () => 'x';
+    const result = await tpoGet({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.success, true);
+    assert.equal(result.session, 'RTH');
+    assert.equal(result.period_min, 30);
+    assert.equal(result.poc, 24530);
+    assert.deepEqual(result.value_area, { vah: 24580, val: 24470 });
+    assert.deepEqual(result.initial_balance, { high: 24580, low: 24500 });
+    assert.equal(result.letter_rows.length, 3);
+    assert.equal(result.single_prints.length, 1);
+    assert.equal(result.single_prints[0].letters, 'A');
   });
 });

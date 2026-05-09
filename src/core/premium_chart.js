@@ -357,3 +357,19 @@ export async function tpoAdd({ period_min = 30, session = 'RTH', va_pct = 0.7, _
   });
   return { success: true, study_id: studyId, period_min, session, va_pct };
 }
+
+// ── Task 4.2: tpoGet ─────────────────────────────────────────────────────────
+
+export async function tpoGet({ _deps } = {}) {
+  const parsed = await readHelperTable(MAGIC_TPO, { _deps });
+  return {
+    success: true,
+    session: parsed.session,
+    period_min: parsed.period_min,
+    poc: parsed.poc,
+    value_area: parsed.value_area,
+    initial_balance: parsed.initial_balance,
+    letter_rows: parsed.letter_rows,
+    single_prints: parsed.single_prints,
+  };
+}
