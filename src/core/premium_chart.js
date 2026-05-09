@@ -234,3 +234,11 @@ export async function vpGet({ bins_limit = 100, _deps } = {}) {
     bins,
   };
 }
+
+export async function vpRemove({ _deps } = {}) {
+  const { manageIndicator } = _resolve(_deps);
+  const id = await findHelperStudy({ _deps });
+  if (!id) return { success: true, removed: false };
+  await manageIndicator({ action: 'remove', indicator: HELPER_NAME });
+  return { success: true, removed: true };
+}

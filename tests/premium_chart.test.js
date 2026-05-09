@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -152,5 +152,25 @@ describe('vpGet', () => {
     const fakeGetChartApi = async () => 'window.fakeChart';
     const result = await vpGet({ bins_limit: 3, _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
     assert.equal(result.bins.length, 3);
+  });
+});
+
+describe('vpRemove', () => {
+  it('removes helper and returns removed:true when present', async () => {
+    let removed = false;
+    const fakeEvaluate = async () => removed ? [] : [{ id: 'st_helper', name: 'TV-MCP Helper' }];
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const fakeManageIndicator = async () => { removed = true; return { success: true }; };
+    const result = await vpRemove({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi, manageIndicator: fakeManageIndicator } });
+    assert.equal(result.success, true);
+    assert.equal(result.removed, true);
+  });
+
+  it('returns removed:false when not present (idempotent)', async () => {
+    const fakeEvaluate = async () => ([]);
+    const fakeGetChartApi = async () => 'window.fakeChart';
+    const result = await vpRemove({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
+    assert.equal(result.success, true);
+    assert.equal(result.removed, false);
   });
 });
