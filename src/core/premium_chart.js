@@ -27,6 +27,8 @@ function _resolve(deps) {
     getChartApi:     deps?.getChartApi     || _getChartApi,
     setInputs:       deps?.setInputs       || indicatorCore.setInputs,
     manageIndicator: deps?.manageIndicator || chartCore.manageIndicator,
+    setType:         deps?.setType         || chartCore.setType,
+    getChartState:   deps?.getChartState   || chartCore.getState,
   };
 }
 
@@ -372,4 +374,24 @@ export async function tpoGet({ _deps } = {}) {
     letter_rows: parsed.letter_rows,
     single_prints: parsed.single_prints,
   };
+}
+
+// ── Task 5.1: footprintToggle ────────────────────────────────────────────────
+
+const FOOTPRINT_TYPE_NAME = 'VolumeFootprint';
+let _previousChartType = null;
+
+export async function footprintToggle({ enable = true, _deps } = {}) {
+  const { setType, getChartState } = _resolve(_deps);
+  if (enable) {
+    const state = await getChartState();
+    const prev = state?.chart_type || state?.chartType || state?.type || 'Candles';
+    if (prev !== FOOTPRINT_TYPE_NAME) _previousChartType = prev;
+    await setType({ type: FOOTPRINT_TYPE_NAME });
+    return { success: true, current_type: FOOTPRINT_TYPE_NAME, previous_type: _previousChartType };
+  } else {
+    const target = _previousChartType || 'Candles';
+    await setType({ type: target });
+    return { success: true, current_type: target, previous_type: FOOTPRINT_TYPE_NAME };
+  }
 }

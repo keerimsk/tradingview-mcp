@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet, footprintToggle } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -293,5 +293,37 @@ describe('tpoGet', () => {
     assert.equal(result.letter_rows.length, 3);
     assert.equal(result.single_prints.length, 1);
     assert.equal(result.single_prints[0].letters, 'A');
+  });
+});
+
+describe('footprintToggle', () => {
+  it('switches chart type to VolumeFootprint and remembers previous', async () => {
+    const calls = [];
+    const fakeSetType = async ({ type }) => { calls.push(type); return { success: true }; };
+    const fakeGetState = async () => ({ chart_type: 'Candles' });
+    const result = await footprintToggle({
+      enable: true,
+      _deps: { setType: fakeSetType, getChartState: fakeGetState, evaluate: async () => null, getChartApi: async () => 'x' },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.current_type, 'VolumeFootprint');
+    assert.equal(result.previous_type, 'Candles');
+    assert.equal(calls[0], 'VolumeFootprint');
+  });
+
+  it('reverts to remembered previous type', async () => {
+    let chart_type = 'VolumeFootprint';
+    const fakeSetType = async ({ type }) => { chart_type = type; return { success: true }; };
+    const fakeGetState = async () => ({ chart_type });
+    await footprintToggle({
+      enable: true,
+      _deps: { setType: fakeSetType, getChartState: fakeGetState, evaluate: async () => null, getChartApi: async () => 'x' },
+    });
+    chart_type = 'VolumeFootprint';
+    const result = await footprintToggle({
+      enable: false,
+      _deps: { setType: fakeSetType, getChartState: fakeGetState, evaluate: async () => null, getChartApi: async () => 'x' },
+    });
+    assert.equal(result.current_type, 'Candles');
   });
 });
