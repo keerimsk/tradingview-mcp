@@ -242,3 +242,28 @@ export async function vpRemove({ _deps } = {}) {
   await manageIndicator({ action: 'remove', indicator: HELPER_NAME });
   return { success: true, removed: true };
 }
+
+export const PATTERN_STUDY_NAMES = {
+  candlestick: 'All Candlestick Patterns',
+  harmonic:    'Harmonic Patterns',
+  auto_fib:    'Auto Fib Retracement',
+};
+
+export async function patternsAdd({ kinds = [], _deps } = {}) {
+  if (!Array.isArray(kinds) || kinds.length === 0) {
+    throw new Error('patternsAdd: provide at least one kind');
+  }
+  for (const k of kinds) {
+    if (!(k in PATTERN_STUDY_NAMES)) {
+      throw new Error(`patternsAdd: unknown kind "${k}". Allowed: ${Object.keys(PATTERN_STUDY_NAMES).join(', ')}`);
+    }
+  }
+  const { manageIndicator } = _resolve(_deps);
+  const added = [];
+  for (const kind of kinds) {
+    const name = PATTERN_STUDY_NAMES[kind];
+    const r = await manageIndicator({ action: 'add', indicator: name });
+    added.push({ kind, name, study_id: r?.entity_id || r?.id || null });
+  }
+  return { success: true, added };
+}

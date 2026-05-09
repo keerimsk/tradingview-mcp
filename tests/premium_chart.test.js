@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -172,5 +172,34 @@ describe('vpRemove', () => {
     const result = await vpRemove({ _deps: { evaluate: fakeEvaluate, getChartApi: fakeGetChartApi } });
     assert.equal(result.success, true);
     assert.equal(result.removed, false);
+  });
+});
+
+describe('patternsAdd', () => {
+  it('adds candlestick pattern study by full name', async () => {
+    const calls = [];
+    const fakeManageIndicator = async (args) => { calls.push(args); return { success: true, entity_id: 'st_p1' }; };
+    const result = await patternsAdd({
+      kinds: ['candlestick'],
+      _deps: { manageIndicator: fakeManageIndicator, evaluate: async () => [], getChartApi: async () => 'x' },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.added.length, 1);
+    assert.equal(result.added[0].kind, 'candlestick');
+    assert.equal(calls[0].indicator, PATTERN_STUDY_NAMES.candlestick);
+  });
+
+  it('adds multiple kinds in one call', async () => {
+    const fakeManageIndicator = async () => ({ success: true, entity_id: 'st_x' });
+    const result = await patternsAdd({
+      kinds: ['candlestick', 'harmonic'],
+      _deps: { manageIndicator: fakeManageIndicator, evaluate: async () => [], getChartApi: async () => 'x' },
+    });
+    assert.equal(result.added.length, 2);
+  });
+
+  it('rejects empty or invalid kinds', async () => {
+    await assert.rejects(() => patternsAdd({ kinds: [] }), /at least one/i);
+    await assert.rejects(() => patternsAdd({ kinds: ['bogus'] }), /unknown kind/i);
   });
 });
