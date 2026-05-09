@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet, footprintToggle, barMagnifierToggle } from '../src/core/premium_chart.js';
+import { parseMcpTable, MAGIC_VP, MAGIC_TPO, findHelperStudy, readHelperTable, vpAdd, vpGet, vpRemove, patternsAdd, PATTERN_STUDIES, PATTERN_STUDY_NAMES, patternsList, tpoAdd, tpoGet, footprintToggle, barMagnifierToggle } from '../src/core/premium_chart.js';
 
 describe('parseMcpTable — Volume Profile', () => {
   const sampleVpRows = [
@@ -186,7 +186,7 @@ describe('patternsAdd', () => {
     assert.equal(result.success, true);
     assert.equal(result.added.length, 1);
     assert.equal(result.added[0].kind, 'candlestick');
-    assert.equal(calls[0].indicator, PATTERN_STUDY_NAMES.candlestick);
+    assert.equal(calls[0].indicator, PATTERN_STUDIES.candlestick.scriptIdPart);
   });
 
   it('adds multiple kinds in one call', async () => {
@@ -205,14 +205,14 @@ describe('patternsAdd', () => {
 });
 
 describe('patternsList', () => {
-  it('returns parsed patterns with kind, name, price, bar_time', async () => {
+  it('returns parsed patterns with kind, name, short, price, bar_index', async () => {
     const fakeEvaluate = async (expr) => {
       return [
-        { name: 'All Candlestick Patterns', items: [
-          { id: 'l1', raw: { text: 'Bullish Engulfing', points: [{ price: 24512.5, time: 1715260200 }] } },
+        { name: '*All Candlestick Patterns*', items: [
+          { id: 'l1', raw: { t: 'BE', tt: 'Bullish Engulfing\nLong description...', y: 24512.5, x: 1234 } },
         ]},
         { name: 'Harmonic Patterns', items: [
-          { id: 'l2', raw: { text: 'Bullish Gartley', points: [{ price: 24470.0, time: 1715253000 }] } },
+          { id: 'l2', raw: { t: 'BG', tt: 'Bullish Gartley\nA harmonic pattern...', y: 24470.0, x: 1200 } },
         ]},
       ];
     };
@@ -222,16 +222,19 @@ describe('patternsList', () => {
     assert.equal(result.patterns.length, 2);
     assert.equal(result.patterns[0].kind, 'candlestick');
     assert.equal(result.patterns[0].name, 'Bullish Engulfing');
+    assert.equal(result.patterns[0].short, 'BE');
+    assert.equal(result.patterns[0].price, 24512.5);
+    assert.equal(result.patterns[0].bar_index, 1234);
     assert.equal(result.patterns[1].kind, 'harmonic');
   });
 
   it('filters by kinds', async () => {
     const fakeEvaluate = async () => [
-      { name: 'All Candlestick Patterns', items: [
-        { id: 'l1', raw: { text: 'Doji', points: [{ price: 100, time: 1 }] } },
+      { name: '*All Candlestick Patterns*', items: [
+        { id: 'l1', raw: { t: 'D', tt: 'Doji\n...', y: 100, x: 1 } },
       ]},
       { name: 'Harmonic Patterns', items: [
-        { id: 'l2', raw: { text: 'Bat', points: [{ price: 200, time: 2 }] } },
+        { id: 'l2', raw: { t: 'B', tt: 'Bat\n...', y: 200, x: 2 } },
       ]},
     ];
     const fakeGetChartApi = async () => 'window.fakeChart';

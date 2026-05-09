@@ -267,33 +267,57 @@ export async function vpRemove({ _deps } = {}) {
   return { success: true, removed: true };
 }
 
-export const PATTERN_STUDY_NAMES = {
-  candlestick: 'All Candlestick Patterns',
-  harmonic:    'Harmonic Patterns',
-  auto_fib:    'Auto Fib Retracement',
+// TradingView built-in pattern studies. scriptIdPart is what chart.createStudy
+// actually accepts (verified live: createStudy("All Candlestick Patterns") fails
+// with new_study_count=0; createStudy("STD;Candlestick%1Pattern%1...") works).
+// displayName is what TV puts in metaInfo().description after the study is on
+// chart — used by patternsList to filter dataSources. Note the asterisks in
+// the candlestick name are part of TV's own labeling.
+//
+// Harmonic Patterns: scriptIdPart unverified (not exposed in user's plan when
+// probed, or naming differs). Listed for completeness; will fail at runtime
+// until verified.
+export const PATTERN_STUDIES = {
+  candlestick: {
+    scriptIdPart: 'STD;Candlestick%1Pattern%1All%1Candlestick%1Patterns',
+    displayName:  '*All Candlestick Patterns*',
+  },
+  harmonic: {
+    scriptIdPart: 'STD;Harmonic%1Patterns',
+    displayName:  'Harmonic Patterns',
+  },
+  auto_fib: {
+    scriptIdPart: 'STD;Auto%1Fib%1Retracement%1',
+    displayName:  'Auto Fib Retracement',
+  },
 };
+
+// Backwards-compat alias for tests / external consumers that imported this.
+export const PATTERN_STUDY_NAMES = Object.fromEntries(
+  Object.entries(PATTERN_STUDIES).map(([k, v]) => [k, v.displayName])
+);
 
 export async function patternsAdd({ kinds = [], _deps } = {}) {
   if (!Array.isArray(kinds) || kinds.length === 0) {
     throw new Error('patternsAdd: provide at least one kind');
   }
   for (const k of kinds) {
-    if (!(k in PATTERN_STUDY_NAMES)) {
-      throw new Error(`patternsAdd: unknown kind "${k}". Allowed: ${Object.keys(PATTERN_STUDY_NAMES).join(', ')}`);
+    if (!(k in PATTERN_STUDIES)) {
+      throw new Error(`patternsAdd: unknown kind "${k}". Allowed: ${Object.keys(PATTERN_STUDIES).join(', ')}`);
     }
   }
   const { manageIndicator } = _resolve(_deps);
   const added = [];
   for (const kind of kinds) {
-    const name = PATTERN_STUDY_NAMES[kind];
-    const r = await manageIndicator({ action: 'add', indicator: name });
-    added.push({ kind, name, study_id: r?.entity_id || r?.id || null });
+    const { scriptIdPart, displayName } = PATTERN_STUDIES[kind];
+    const r = await manageIndicator({ action: 'add', indicator: scriptIdPart });
+    added.push({ kind, name: displayName, study_id: r?.entity_id || r?.id || null });
   }
   return { success: true, added };
 }
 
-const STUDY_NAME_TO_KIND = Object.fromEntries(
-  Object.entries(PATTERN_STUDY_NAMES).map(([k, v]) => [v, k])
+const DISPLAY_NAME_TO_KIND = Object.fromEntries(
+  Object.entries(PATTERN_STUDIES).map(([k, v]) => [v.displayName, k])
 );
 
 export async function patternsList({ kinds, max_per_kind = 25, _deps } = {}) {
@@ -301,8 +325,8 @@ export async function patternsList({ kinds, max_per_kind = 25, _deps } = {}) {
   const apiPath = await getChartApi();
 
   const allowedNames = (kinds && kinds.length > 0)
-    ? kinds.map(k => PATTERN_STUDY_NAMES[k]).filter(Boolean)
-    : Object.values(PATTERN_STUDY_NAMES);
+    ? kinds.map(k => PATTERN_STUDIES[k]?.displayName).filter(Boolean)
+    : Object.values(PATTERN_STUDIES).map(v => v.displayName);
 
   const studiesWithLabels = await evaluate(`
     (function() {
@@ -339,19 +363,27 @@ export async function patternsList({ kinds, max_per_kind = 25, _deps } = {}) {
   const patterns = [];
   for (const st of (studiesWithLabels || [])) {
     if (!allowedNames.includes(st.name)) continue;
-    const kind = STUDY_NAME_TO_KIND[st.name];
+    const kind = DISPLAY_NAME_TO_KIND[st.name];
     const cap = Math.max(1, Math.min(200, max_per_kind));
     const items = (st.items || []).slice(0, cap);
     for (const item of items) {
-      const text  = item.raw?.text ?? item.raw?.label ?? '';
-      const point = item.raw?.points?.[0] ?? item.raw?.point ?? {};
-      const price = Number(point.price);
-      const time  = Number(point.time);
+      const v = item.raw || {};
+      // TV label primitive fields: t=short text (may have \n + zigzag spacers), tt=tooltip, y=price, x=bar index.
+      const cleanLine = (s) => String(s || '').split('\n')[0].replace(/[‎‏]/g, '').trim();
+      const shortRaw = v.t ?? v.text ?? v.label ?? '';
+      const tooltip  = v.tt ?? '';
+      const price    = Number(v.y ?? v.price);
+      const barIndex = Number(v.x);
+      // Tooltip first line is canonical name (e.g., "Engulfing\n<long description>").
+      // Auto Fib has no tooltip; t holds "0(93.65)\n<padding>" — strip newline + bidirectional marks.
+      const shortText = cleanLine(shortRaw);
+      const fullName  = tooltip ? cleanLine(tooltip) : shortText;
       patterns.push({
         kind,
-        name: String(text || '').trim(),
+        name: fullName || shortText,
+        short: shortText || null,
         price: Number.isFinite(price) ? price : null,
-        bar_time: Number.isFinite(time) ? new Date(time * 1000).toISOString() : null,
+        bar_index: Number.isFinite(barIndex) ? barIndex : null,
       });
     }
   }
