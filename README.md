@@ -214,8 +214,12 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "What's the value area / POC?" | `vp_add` → `vp_get` |
+| "Show me detected candlestick patterns" | `patterns_add` → `patterns_list` |
+| "Read the TPO profile" | `tpo_add` → `tpo_get` |
+| "Switch to footprint" | `footprint_toggle` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (88 MCP tools)
 
 ### Chart Reading
 
@@ -309,6 +313,17 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
+### Premium Chart Types (Ultimate)
+
+| Tool | What it does |
+|------|-------------|
+| `premium_install_helper` | One-time: install `pine/mcp-helper.pine` indicator |
+| `vp_add` / `vp_get` / `vp_remove` | Volume Profile (POC, VAH, VAL, bins) — variants: visible_range / fixed_range / session |
+| `patterns_add` / `patterns_list` | Auto-detected candlestick, harmonic, auto-fib patterns |
+| `tpo_add` / `tpo_get` | TPO Market Profile (letter rows, value area, IB, single prints) |
+| `footprint_toggle` | Toggle Volume Footprint chart type |
+| `bar_magnifier_toggle` | Toggle Bar Magnifier setting |
+
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
@@ -351,7 +366,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (88 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
