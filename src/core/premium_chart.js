@@ -10,6 +10,11 @@ import {
   getChartApi as _getChartApi,
   safeString,
 } from '../connection.js';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import * as pineCore from './pine.js';
+import * as chartCore from './chart.js';
 
 export const MAGIC_VP  = 'MCP_VP_v1';
 export const MAGIC_TPO = 'MCP_TPO_v1';
@@ -158,4 +163,29 @@ export async function readHelperTable(expectedMagic, { _deps } = {}) {
 
   const sorted = [...rowsMap.entries()].sort((a, b) => a[0] - b[0]).map(([, cols]) => cols);
   return parseMcpTable(sorted, expectedMagic);
+}
+
+export async function installHelper({ _deps } = {}) {
+  const existing = await findHelperStudy({ _deps });
+  if (existing) {
+    return { success: true, action: 'already_installed', study_id: existing };
+  }
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pinePath = join(here, '..', '..', 'pine', 'mcp-helper.pine');
+  const source = await readFile(pinePath, 'utf-8');
+
+  // pine.js: setSource({ source }), smartCompile() (no args), save() (no args — Ctrl+S)
+  // chart.js: manageIndicator({ action, indicator }) — parameter is 'indicator', not 'name'
+  await pineCore.setSource({ source });
+  await pineCore.smartCompile();
+  await pineCore.save();
+  await chartCore.manageIndicator({ action: 'add', indicator: HELPER_NAME });
+
+  await new Promise(r => setTimeout(r, 800));
+  const newId = await findHelperStudy({ _deps });
+  if (!newId) {
+    throw new Error('installHelper: helper indicator added but cannot be found on chart.');
+  }
+  return { success: true, action: 'installed', study_id: newId };
 }
