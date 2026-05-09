@@ -299,7 +299,7 @@ describe('tpoGet', () => {
 describe('footprintToggle', () => {
   it('switches chart type to VolumeFootprint and remembers previous', async () => {
     const calls = [];
-    const fakeSetType = async ({ type }) => { calls.push(type); return { success: true }; };
+    const fakeSetType = async ({ chart_type }) => { calls.push(chart_type); return { success: true }; };
     const fakeGetState = async () => ({ chart_type: 'Candles' });
     const result = await footprintToggle({
       enable: true,
@@ -313,7 +313,7 @@ describe('footprintToggle', () => {
 
   it('reverts to remembered previous type', async () => {
     let chart_type = 'VolumeFootprint';
-    const fakeSetType = async ({ type }) => { chart_type = type; return { success: true }; };
+    const fakeSetType = async ({ chart_type: ct }) => { chart_type = ct; return { success: true }; };
     const fakeGetState = async () => ({ chart_type });
     await footprintToggle({
       enable: true,

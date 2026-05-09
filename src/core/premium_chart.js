@@ -378,6 +378,10 @@ export async function tpoGet({ _deps } = {}) {
 
 // ── Task 5.1: footprintToggle ────────────────────────────────────────────────
 
+// NOTE: VolumeFootprint enum value is unverified — requires tv_discover on user's
+// instance to confirm. chart.setType also has a numeric typeMap that may not
+// include this value, in which case the call will fail until the typeMap is
+// extended. This is tracked as Open Question #3 in the Epic 1 spec.
 const FOOTPRINT_TYPE_NAME = 'VolumeFootprint';
 let _previousChartType = null;
 
@@ -387,11 +391,11 @@ export async function footprintToggle({ enable = true, _deps } = {}) {
     const state = await getChartState();
     const prev = state?.chart_type || state?.chartType || state?.type || 'Candles';
     if (prev !== FOOTPRINT_TYPE_NAME) _previousChartType = prev;
-    await setType({ type: FOOTPRINT_TYPE_NAME });
+    await setType({ chart_type: FOOTPRINT_TYPE_NAME });
     return { success: true, current_type: FOOTPRINT_TYPE_NAME, previous_type: _previousChartType };
   } else {
     const target = _previousChartType || 'Candles';
-    await setType({ type: target });
+    await setType({ chart_type: target });
     return { success: true, current_type: target, previous_type: FOOTPRINT_TYPE_NAME };
   }
 }
