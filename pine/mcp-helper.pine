@@ -25,10 +25,89 @@ tpo_period  = input.int(30,  title="TPO Period (min)", minval=1, maxval=240)
 tpo_session = input.string("RTH", title="TPO Session", options=["RTH", "ETH"])
 tpo_va_pct  = input.float(0.7, title="TPO Value Area %", minval=0.1, maxval=0.99)
 
-// ── Placeholder table to confirm load ──────────────────────────────────────
-var table t = table.new(position.top_right, columns=2, rows=2, border_width=1)
+// ═══ Volume Profile Mode ═══════════════════════════════════════════════════
+emit_vp() =>
+    // Determine range: visible_range / session / fixed_range (using lookback as proxy)
+    int lb = vp_variant == "session" ? math.min(vp_lookback, bar_index - ta.valuewhen(session.isfirstbar, bar_index, 0)) : vp_lookback
+    lb := math.max(lb, 10)
+
+    float low_min  = ta.lowest(low,  lb)
+    float high_max = ta.highest(high, lb)
+    float bin_size = (high_max - low_min) / vp_rows
+
+    // Aggregate volume per bin via hlc3 typical price.
+    var float[] bin_volumes = array.new_float(vp_rows, 0.0)
+    var float[] bin_prices  = array.new_float(vp_rows, 0.0)
+
+    for i = 0 to vp_rows - 1
+        array.set(bin_volumes, i, 0.0)
+        array.set(bin_prices,  i, low_min + bin_size * (i + 0.5))
+
+    for j = 0 to lb - 1
+        float typ = (high[j] + low[j] + close[j]) / 3.0
+        int idx = int(math.floor((typ - low_min) / bin_size))
+        idx := math.max(0, math.min(vp_rows - 1, idx))
+        array.set(bin_volumes, idx, array.get(bin_volumes, idx) + (na(volume[j]) ? 0.0 : volume[j]))
+
+    // POC = argmax bin
+    int   poc_idx = 0
+    float poc_vol = 0.0
+    for k = 0 to vp_rows - 1
+        if array.get(bin_volumes, k) > poc_vol
+            poc_vol := array.get(bin_volumes, k)
+            poc_idx := k
+
+    float poc_price = array.get(bin_prices, poc_idx)
+
+    // Value Area: expand from POC until va_pct of total.
+    float total_vol = array.sum(bin_volumes)
+    float va_target = total_vol * vp_va_pct
+    float va_running = poc_vol
+    int   va_low_i  = poc_idx
+    int   va_high_i = poc_idx
+
+    while va_running < va_target and (va_low_i > 0 or va_high_i < vp_rows - 1)
+        float low_n  = va_low_i  > 0           ? array.get(bin_volumes, va_low_i  - 1) : -1.0
+        float high_n = va_high_i < vp_rows - 1 ? array.get(bin_volumes, va_high_i + 1) : -1.0
+        if low_n < 0 and high_n < 0
+            break
+        if low_n >= high_n
+            va_low_i  -= 1
+            va_running += low_n
+        else
+            va_high_i += 1
+            va_running += high_n
+
+    float val = array.get(bin_prices, va_low_i)
+    float vah = array.get(bin_prices, va_high_i)
+
+    [poc_price, vah, val, total_vol, bin_volumes, bin_prices]
+
+// ═══ Output table emitter ══════════════════════════════════════════════════
+var table t = table.new(position.top_right, columns=2, rows=210, border_width=1)
+
 if barstate.islast
-    table.cell(t, 0, 0, mode == "vp" ? "MCP_VP_v1" : "MCP_TPO_v1")
-    table.cell(t, 1, 0, "loading")
-    table.cell(t, 0, 1, "mode")
-    table.cell(t, 1, 1, mode)
+    if mode == "vp"
+        [poc, vah, val, tvol, bvols, bprices] = emit_vp()
+        table.cell(t, 0, 0, "MCP_VP_v1")
+        table.cell(t, 1, 0, vp_variant)
+        table.cell(t, 0, 1, "poc")
+        table.cell(t, 1, 1, str.tostring(poc, "#.##########"))
+        table.cell(t, 0, 2, "vah")
+        table.cell(t, 1, 2, str.tostring(vah, "#.##########"))
+        table.cell(t, 0, 3, "val")
+        table.cell(t, 1, 3, str.tostring(val, "#.##########"))
+        table.cell(t, 0, 4, "total_volume")
+        table.cell(t, 1, 4, str.tostring(tvol, "#.##"))
+        table.cell(t, 0, 5, "va_pct")
+        table.cell(t, 1, 5, str.tostring(vp_va_pct))
+        table.cell(t, 0, 6, "rows")
+        table.cell(t, 1, 6, str.tostring(vp_rows))
+        // Rows 7..7+vp_rows-1: bin_price | bin_volume
+        for r = 0 to vp_rows - 1
+            table.cell(t, 0, 7 + r, str.tostring(array.get(bprices, r), "#.##########"))
+            table.cell(t, 1, 7 + r, str.tostring(array.get(bvols,    r), "#.##"))
+    else
+        // TPO branch — implemented in next task
+        table.cell(t, 0, 0, "MCP_TPO_v1")
+        table.cell(t, 1, 0, "pending")
