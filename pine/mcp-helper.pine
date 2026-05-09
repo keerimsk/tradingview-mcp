@@ -1,0 +1,34 @@
+//@version=5
+// TV-MCP Helper Indicator
+// Emits Volume Profile and TPO data as tables with magic-string headers
+// for parsing by the tradingview-mcp server.
+//
+// Magic headers:
+//   "MCP_VP_v1"  — Volume Profile output
+//   "MCP_TPO_v1" — TPO output
+//
+// Install: paste into Pine editor, save as "TV-MCP Helper", then add to chart.
+indicator("TV-MCP Helper", overlay=false, max_labels_count=10, max_lines_count=10, max_boxes_count=10)
+
+// ── Mode selection ─────────────────────────────────────────────────────────
+mode = input.string("vp", title="Mode", options=["vp", "tpo"])
+
+// ── VP inputs ──────────────────────────────────────────────────────────────
+vp_variant  = input.string("visible_range", title="VP Variant",
+                           options=["visible_range", "fixed_range", "session"])
+vp_rows     = input.int(24,  title="VP Rows",       minval=4, maxval=200)
+vp_va_pct   = input.float(0.7, title="VP Value Area %", minval=0.1, maxval=0.99)
+vp_lookback = input.int(200, title="VP Lookback Bars", minval=20, maxval=5000)
+
+// ── TPO inputs ─────────────────────────────────────────────────────────────
+tpo_period  = input.int(30,  title="TPO Period (min)", minval=1, maxval=240)
+tpo_session = input.string("RTH", title="TPO Session", options=["RTH", "ETH"])
+tpo_va_pct  = input.float(0.7, title="TPO Value Area %", minval=0.1, maxval=0.99)
+
+// ── Placeholder table to confirm load ──────────────────────────────────────
+var table t = table.new(position.top_right, columns=2, rows=2, border_width=1)
+if barstate.islast
+    table.cell(t, 0, 0, mode == "vp" ? "MCP_VP_v1" : "MCP_TPO_v1")
+    table.cell(t, 1, 0, "loading")
+    table.cell(t, 0, 1, "mode")
+    table.cell(t, 1, 1, mode)
