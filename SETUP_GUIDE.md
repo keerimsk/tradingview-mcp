@@ -90,6 +90,23 @@ npm link
 
 Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 
+## Premium Chart Types (Ultimate plan only)
+
+For Volume Profile and TPO support, install the Pine helper indicator one time:
+
+```bash
+node src/cli/index.js premium install-helper
+```
+
+Or in Claude Code:
+> "Run premium_install_helper"
+
+This pastes `pine/mcp-helper.pine` into your Pine editor, compiles it, saves it as `TV-MCP Helper`, and adds it to your chart. The helper emits Volume Profile and TPO data as a table that the MCP server reads.
+
+**Manual fallback:** if the bootstrap fails (Pine compile error, etc.), open `pine/mcp-helper.pine`, copy contents, paste into the Pine editor in TradingView, save as `TV-MCP Helper`, add to chart.
+
+**Cleanup:** to remove, use `vp_remove` MCP tool or remove `TV-MCP Helper` indicator manually.
+
 ## Troubleshooting
 
 | Problem | Solution |
