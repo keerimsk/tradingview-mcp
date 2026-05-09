@@ -61,6 +61,19 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
 
 export async function getOhlcv({ count, summary } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
+
+  // If requested count exceeds current chart cache, load more history first.
+  let partial = false;
+  if (limit > 500) {
+    try {
+      const currentSize = await evaluate(`(function(){ var b = ${BARS_PATH}; return b && typeof b.size === 'function' ? b.size() : 0; })()`);
+      if (currentSize < limit) {
+        const loadResult = await _loadHistoryUntil(limit);
+        if (!loadResult.reached) partial = true;
+      }
+    } catch { /* fall through — read whatever's available */ }
+  }
+
   let data;
   try {
     data = await evaluate(`
@@ -103,7 +116,13 @@ export async function getOhlcv({ count, summary } = {}) {
     };
   }
 
-  return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+  const out = { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+  if (partial) {
+    out.partial = true;
+    out.requested = limit;
+    out.returned = data.bars.length;
+  }
+  return out;
 }
 
 export async function getIndicator({ entity_id }) {
@@ -451,4 +470,50 @@ export async function getPineBoxes({ study_filter, verbose } = {}) {
     return result;
   });
   return { success: true, study_count: studies.length, studies };
+}
+
+const HISTORY_LOAD_TIMEOUT_MS = 30_000;
+const HISTORY_POLL_INTERVAL_MS = 500;
+
+/**
+ * Best-effort: ask TradingView to load enough history so bars().size() >= target.
+ * Polls until reached or timeout. Returns { reached, final }.
+ *
+ * Tries several known TV history-loading entry points; if none work, becomes a
+ * no-op poll that returns whatever bars are currently cached.
+ */
+export async function _loadHistoryUntil(target, { _deps } = {}) {
+  const getBarCount = _deps?.getBarCount || (async () => {
+    try {
+      return await evaluate(`(function(){ var b = ${BARS_PATH}; return b && typeof b.size === 'function' ? b.size() : 0; })()`);
+    } catch { return 0; }
+  });
+  const requestMore = _deps?.requestMore || (async () => {
+    try {
+      await evaluate(`
+        (function() {
+          var ms = ${CHART_API}._chartWidget.model().mainSeries();
+          if (ms && typeof ms.requestMoreBars === 'function') { ms.requestMoreBars(); return 1; }
+          if (ms && typeof ms.requestMoreData === 'function') { ms.requestMoreData(); return 2; }
+          var chart = ${CHART_API}._chartWidget;
+          if (chart && typeof chart.requestMoreData === 'function') { chart.requestMoreData(); return 3; }
+          return 0;
+        })()
+      `);
+    } catch { /* swallow — best-effort */ }
+  });
+  const timeoutMs = _deps?.timeoutMs ?? HISTORY_LOAD_TIMEOUT_MS;
+  const pollIntervalMs = _deps?.pollIntervalMs ?? HISTORY_POLL_INTERVAL_MS;
+
+  let final = await getBarCount();
+  if (final >= target) return { reached: true, final };
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await requestMore();
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    final = await getBarCount();
+    if (final >= target) return { reached: true, final };
+  }
+  return { reached: false, final };
 }
