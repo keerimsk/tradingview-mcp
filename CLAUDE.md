@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-88 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+89 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -97,6 +97,23 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 **Important:** `vp_get`/`tpo_get` require the helper to be installed first. If they error with "TV-MCP Helper not found", call `premium_install_helper` once.
 
+### "Read recent tick prints"
+
+1. `data_get_ticks` with `limit: 50` → returns last 50 ticks (price, size, side, time)
+
+Pre-condition: TradingView's Time & Sales panel must be open (or auto-openable). If `panel_open: false` in response, instruct the user to open it manually.
+
+### "Sub-minute resolution analysis"
+
+1. `chart_set_timeframe` with `"1S"`, `"5S"`, or `"30S"` (seconds intervals — Ultimate feature, requires symbol to support seconds).
+2. `data_get_ohlcv` to read the resulting fast bars.
+
+If chart_set_timeframe returns `success: false` with "Symbol does not support", fall back to a higher resolution.
+
+### "Deep history backtest data"
+
+`data_get_ohlcv` with `count: 10000` (or up to 40,000) — the tool transparently triggers TradingView to load older bars if the chart cache has fewer than requested. Returns `partial: true` with `requested` / `returned` if loading times out.
+
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading
 - `ui_click` → click buttons by aria-label, text, or data-name
@@ -136,6 +153,8 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `vp_get` | ~2-4 KB (depends on `bins_limit`) |
 | `tpo_get` | ~2-5 KB (depends on level count) |
 | `patterns_list` | ~1-3 KB |
+| `data_get_ticks` (50 ticks) | ~3-5 KB |
+| `data_get_ohlcv` (10000 bars) | ~800 KB — use `summary: true` instead unless raw bars needed |
 
 ## Tool Conventions
 
