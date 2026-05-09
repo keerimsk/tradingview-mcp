@@ -95,7 +95,7 @@ describe('vpAdd', () => {
     assert.equal(result.variant, 'visible_range');
     assert.equal(result.study_id, 'st_helper');
     assert.equal(setInputsCalls.length, 1);
-    assert.equal(setInputsCalls[0].inputs.mode, 'vp');
+    assert.equal(setInputsCalls[0].inputs.in_0, 'vp');
   });
 
   it('errors when helper not installed', async () => {
@@ -252,8 +252,8 @@ describe('tpoAdd', () => {
       _deps: { setInputs: fakeSetInputs, evaluate: fakeEvaluate, getChartApi: fakeGetChartApi },
     });
     assert.equal(result.success, true);
-    assert.equal(calls[0].inputs.mode, 'tpo');
-    assert.equal(calls[0].inputs.tpo_period, 30);
+    assert.equal(calls[0].inputs.in_0, 'tpo');
+    assert.equal(calls[0].inputs.in_5, 30);
   });
 
   it('rejects invalid period_min', async () => {

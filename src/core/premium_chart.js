@@ -156,11 +156,14 @@ export async function readHelperTable(expectedMagic, { _deps } = {}) {
   }
   if (tableData._err) throw new Error('Table read error: ' + tableData._err);
 
+  // TradingView Pine table cells expose: v.tid (table id), v.row, v.col, v.t (text).
+  // Older field-name fallbacks kept defensively for forward compat.
   const rowsMap = new Map();
   for (const cell of tableData) {
-    const r = cell.raw?.row ?? cell.raw?.rowIndex ?? cell.raw?.points?.[0]?.row;
-    const c = cell.raw?.column ?? cell.raw?.colIndex ?? cell.raw?.points?.[0]?.column;
-    const text = cell.raw?.text ?? cell.raw?.cellText ?? cell.raw?.value ?? '';
+    const v = cell.raw || {};
+    const r = v.row ?? v.rowIndex ?? v.points?.[0]?.row;
+    const c = v.col ?? v.column ?? v.colIndex ?? v.points?.[0]?.column;
+    const text = v.t ?? v.text ?? v.cellText ?? v.value ?? '';
     if (r === undefined || c === undefined) continue;
     if (!rowsMap.has(r)) rowsMap.set(r, []);
     rowsMap.get(r)[c] = String(text);
@@ -197,6 +200,20 @@ export async function installHelper({ _deps } = {}) {
 
 const VP_VARIANTS = ['visible_range', 'fixed_range', 'session'];
 
+// TradingView re-IDs Pine inputs as in_0, in_1, ... in declaration order.
+// Helper Pine declaration order: mode, vp_variant, vp_rows, vp_va_pct, vp_lookback,
+// tpo_period, tpo_session, tpo_va_pct.
+const HELPER_INPUT_IDS = {
+  mode:        'in_0',
+  vp_variant:  'in_1',
+  vp_rows:     'in_2',
+  vp_va_pct:   'in_3',
+  vp_lookback: 'in_4',
+  tpo_period:  'in_5',
+  tpo_session: 'in_6',
+  tpo_va_pct:  'in_7',
+};
+
 export async function vpAdd({ variant = 'visible_range', rows = 24, va_pct = 0.7, _deps } = {}) {
   if (!VP_VARIANTS.includes(variant)) {
     throw new Error(`vpAdd: invalid variant "${variant}". Must be one of ${VP_VARIANTS.join(', ')}.`);
@@ -216,7 +233,12 @@ export async function vpAdd({ variant = 'visible_range', rows = 24, va_pct = 0.7
 
   await setInputs({
     entity_id: studyId,
-    inputs: { mode: 'vp', vp_variant: variant, vp_rows: rows, vp_va_pct: va_pct },
+    inputs: {
+      [HELPER_INPUT_IDS.mode]:       'vp',
+      [HELPER_INPUT_IDS.vp_variant]: variant,
+      [HELPER_INPUT_IDS.vp_rows]:    rows,
+      [HELPER_INPUT_IDS.vp_va_pct]:  va_pct,
+    },
   });
 
   return { success: true, study_id: studyId, variant, rows, va_pct };
@@ -355,7 +377,12 @@ export async function tpoAdd({ period_min = 30, session = 'RTH', va_pct = 0.7, _
   if (!studyId) throw new Error(`${HELPER_NAME} not found. Run 'tv premium install-helper' first.`);
   await setInputs({
     entity_id: studyId,
-    inputs: { mode: 'tpo', tpo_period: period_min, tpo_session: session, tpo_va_pct: va_pct },
+    inputs: {
+      [HELPER_INPUT_IDS.mode]:        'tpo',
+      [HELPER_INPUT_IDS.tpo_period]:  period_min,
+      [HELPER_INPUT_IDS.tpo_session]: session,
+      [HELPER_INPUT_IDS.tpo_va_pct]:  va_pct,
+    },
   });
   return { success: true, study_id: studyId, period_min, session, va_pct };
 }
