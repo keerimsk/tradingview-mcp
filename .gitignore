@@ -25,3 +25,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Internal AI workflow planning (not for public)
+docs/superpowers/
