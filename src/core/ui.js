@@ -2,30 +2,213 @@
  * Core UI automation logic.
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { dismissIfPresent } from './dialog.js';
 
-export async function click({ by, value }) {
-  const escaped = JSON.stringify(value);
+// Shared in-page helper. Walks document + open shadow roots looking for a match.
+// Returns the first matching element (or null). Used by click/hover/findElement/checkbox.
+const RESOLVE_SELECTOR_JS = `
+function __tvmcpResolve(by, value) {
+  function walkAll(root, visit) {
+    var stack = [root];
+    while (stack.length) {
+      var node = stack.pop();
+      if (visit(node)) return true;
+      if (node.shadowRoot) stack.push(node.shadowRoot);
+      var kids = node.children || (node.host ? [] : []);
+      for (var i = 0; i < kids.length; i++) stack.push(kids[i]);
+      if (node.querySelectorAll) {
+        // Also descend any open shadow roots inside descendants
+        var shadowHosts = node.querySelectorAll('*');
+        for (var j = 0; j < shadowHosts.length; j++) {
+          if (shadowHosts[j].shadowRoot) stack.push(shadowHosts[j].shadowRoot);
+        }
+      }
+    }
+    return false;
+  }
+  function matches(el) {
+    if (!el || !el.getAttribute) return false;
+    if (by === 'aria-label') return el.getAttribute('aria-label') === value;
+    if (by === 'data-name') return el.getAttribute('data-name') === value;
+    if (by === 'class-contains') {
+      var cls = el.getAttribute('class') || '';
+      return cls.indexOf(value) !== -1;
+    }
+    if (by === 'text') {
+      var tag = el.tagName;
+      if (!tag) return false;
+      var t = (el.textContent || '').trim();
+      if (!t) return false;
+      var rolesOk = ['BUTTON', 'A'].indexOf(tag) !== -1
+        || el.getAttribute('role') === 'button'
+        || el.getAttribute('role') === 'menuitem'
+        || el.getAttribute('role') === 'tab';
+      if (!rolesOk) return false;
+      return t === value || t.toLowerCase() === value.toLowerCase();
+    }
+    return false;
+  }
+  // Phase 1: light query for cheap selectors (no shadow walk)
+  if (by === 'aria-label') {
+    var fast = document.querySelector('[aria-label="' + String(value).replace(/"/g, '\\\\"') + '"]');
+    if (fast) return fast;
+  } else if (by === 'data-name') {
+    var fast2 = document.querySelector('[data-name="' + String(value).replace(/"/g, '\\\\"') + '"]');
+    if (fast2) return fast2;
+  } else if (by === 'class-contains') {
+    var fast3 = document.querySelector('[class*="' + String(value).replace(/"/g, '\\\\"') + '"]');
+    if (fast3) return fast3;
+  }
+  // Phase 2: deep walk including shadow roots
+  var match = null;
+  walkAll(document, function(n) { if (matches(n)) { match = n; return true; } return false; });
+  return match;
+}
+`;
+
+function buildResolverExpr(by, value, opts = {}) {
+  // Returns a JS IIFE expression that resolves the selector and calls `then(el)`,
+  // returning whatever `then` returns. Used to keep the selector logic shared.
+  return `
+    (function() {
+      ${RESOLVE_SELECTOR_JS}
+      var el = __tvmcpResolve(${JSON.stringify(by)}, ${JSON.stringify(value)});
+      if (!el) return ${JSON.stringify(opts.notFoundReturn ?? null)};
+      ${opts.afterResolve || 'return el;'}
+    })()
+  `;
+}
+
+async function waitForElement({ by, value, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await evaluate(`
+      (function() {
+        ${RESOLVE_SELECTOR_JS}
+        var el = __tvmcpResolve(${JSON.stringify(by)}, ${JSON.stringify(value)});
+        return !!el;
+      })()
+    `);
+    if (found) return true;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return false;
+}
+
+export async function click({ by, value, wait_ms = 0, retries = 0, wait_after_ms = 0 }) {
+  if (wait_ms > 0) {
+    const ok = await waitForElement({ by, value, timeoutMs: Math.min(wait_ms, 5000) });
+    if (!ok) throw new Error(`Element ${by}="${value}" did not appear within ${wait_ms}ms`);
+  }
+
+  let lastResult = null;
+  const attempts = 1 + Math.max(0, Math.min(retries, 3));
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    lastResult = await evaluate(buildResolverExpr(by, value, {
+      notFoundReturn: { found: false },
+      afterResolve: `
+        try { el.click(); } catch(e) { return { found: true, error: e.message }; }
+        return {
+          found: true,
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent || '').trim().substring(0, 80),
+          aria_label: el.getAttribute('aria-label') || null,
+          data_name: el.getAttribute('data-name') || null
+        };
+      `,
+    }));
+    if (lastResult && lastResult.found && !lastResult.error) break;
+    if (attempt < attempts - 1) await new Promise(r => setTimeout(r, 100));
+  }
+
+  if (!lastResult || !lastResult.found) {
+    throw new Error('No matching element found for ' + by + '="' + value + '"');
+  }
+  if (lastResult.error) {
+    throw new Error(`Click failed: ${lastResult.error}`);
+  }
+
+  if (wait_after_ms > 0) {
+    await new Promise(r => setTimeout(r, Math.min(wait_after_ms, 2000)));
+  }
+
+  return { success: true, clicked: lastResult, attempts: attempts };
+}
+
+/**
+ * Idempotent checkbox toggle. Reads current state and clicks only if mismatched.
+ * Supports native <input type="checkbox"> and ARIA [role="checkbox"].
+ * Lookup by visible label text (matched against <label for=...>, ancestor <label>,
+ * or aria-label), or by selector strategy + value.
+ */
+export async function setCheckbox({ label, by, value, checked }) {
+  if (typeof checked !== 'boolean') throw new Error('checked must be boolean');
+  if (!label && !by) throw new Error('Provide either label or (by, value)');
+
   const result = await evaluate(`
     (function() {
-      var by = ${JSON.stringify(by)};
-      var value = ${escaped};
+      ${RESOLVE_SELECTOR_JS}
+      var label = ${JSON.stringify(label || null)};
+      var by = ${JSON.stringify(by || null)};
+      var value = ${JSON.stringify(value || null)};
+      var desired = ${JSON.stringify(checked)};
       var el = null;
-      if (by === 'aria-label') el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
-      else if (by === 'data-name') el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
-      else if (by === 'text') {
-        var candidates = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"]');
-        for (var i = 0; i < candidates.length; i++) {
-          var text = candidates[i].textContent.trim();
-          if (text === value || text.toLowerCase() === value.toLowerCase()) { el = candidates[i]; break; }
+
+      if (by) {
+        el = __tvmcpResolve(by, value);
+      } else if (label) {
+        // Find checkbox via associated label
+        var labels = document.querySelectorAll('label');
+        for (var i = 0; i < labels.length; i++) {
+          var t = (labels[i].textContent || '').trim();
+          if (t === label || t.toLowerCase() === label.toLowerCase()) {
+            var forId = labels[i].getAttribute('for');
+            if (forId) { el = document.getElementById(forId); if (el) break; }
+            var inner = labels[i].querySelector('input[type="checkbox"], [role="checkbox"]');
+            if (inner) { el = inner; break; }
+          }
         }
-      } else if (by === 'class-contains') el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
+        // Fallback: aria-label
+        if (!el) {
+          el = document.querySelector('input[type="checkbox"][aria-label="' + label.replace(/"/g, '\\\\"') + '"]')
+            || document.querySelector('[role="checkbox"][aria-label="' + label.replace(/"/g, '\\\\"') + '"]');
+        }
+        // Fallback: text near a checkbox
+        if (!el) {
+          var allCbs = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+          for (var k = 0; k < allCbs.length; k++) {
+            var p = allCbs[k].closest('label, [class*="row"], [class*="item"]');
+            if (p && (p.textContent || '').trim().toLowerCase().indexOf(label.toLowerCase()) !== -1) {
+              el = allCbs[k]; break;
+            }
+          }
+        }
+      }
+
       if (!el) return { found: false };
+      var isInput = el.tagName === 'INPUT';
+      var current = isInput ? !!el.checked : el.getAttribute('aria-checked') === 'true';
+      if (current === desired) {
+        return { found: true, was: current, clicked: false };
+      }
       el.click();
-      return { found: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().substring(0, 80), aria_label: el.getAttribute('aria-label') || null, data_name: el.getAttribute('data-name') || null };
+      var nowState = isInput ? !!el.checked : el.getAttribute('aria-checked') === 'true';
+      return { found: true, was: current, clicked: true, now: nowState };
     })()
   `);
-  if (!result || !result.found) throw new Error('No matching element found for ' + by + '="' + value + '"');
-  return { success: true, clicked: result };
+
+  if (!result || !result.found) {
+    throw new Error(`Checkbox not found: ${label ? `label="${label}"` : `${by}="${value}"`}`);
+  }
+  return {
+    success: true,
+    label: label || null,
+    selector: by ? { by, value } : null,
+    was: result.was,
+    desired: checked,
+    clicked: result.clicked,
+    now: result.now ?? result.was,
+  };
 }
 
 export async function openPanel({ panel, action }) {
@@ -140,24 +323,20 @@ export async function layoutSwitch({ name }) {
   `);
   if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
 
-  // Handle "unsaved changes" confirmation dialog
+  // Handle "unsaved changes" confirmation dialog. Tries 'discard' first
+  // (Open anyway / Don't save), falling back to 'cancel' if that's the only option.
   await new Promise(r => setTimeout(r, 500));
-  const dismissed = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/open anyway|don't save|discard/i.test(text)) {
-          btns[i].click();
-          return true;
-        }
-      }
-      return false;
-    })()
-  `);
-
-  if (dismissed) await new Promise(r => setTimeout(r, 1000));
-  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
+  const dialog = await dismissIfPresent({ intents: ['discard', 'cancel'] });
+  if (dialog.dismissed) await new Promise(r => setTimeout(r, 1000));
+  return {
+    success: true,
+    layout: result.name || name,
+    layout_id: result.id,
+    source: result.source,
+    action: 'switched',
+    unsaved_dialog_dismissed: dialog.dismissed,
+    dialog_button: dialog.clicked || null,
+  };
 }
 
 export async function keyboard({ key, modifiers }) {
@@ -234,19 +413,103 @@ export async function scroll({ direction, amount }) {
   return { success: true, direction, amount: px };
 }
 
-export async function mouseClick({ x, y, button, double_click }) {
+/**
+ * Get viewport size and devicePixelRatio. Useful for:
+ *  - mapping screenshot pixels back to CSS coordinates (CDP Input expects CSS px)
+ *  - vision-based workflows (Claude needs to know image dimensions)
+ */
+export async function getViewport() {
+  const info = await evaluate(`
+    (function() {
+      return {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1
+      };
+    })()
+  `);
+  return { success: true, ...info };
+}
+
+export async function mouseClick({ x, y, button, double_click, coords_are }) {
+  // CDP Input.dispatchMouseEvent expects CSS pixels. If caller is reading
+  // coordinates off a screenshot at devicePixelRatio>1, divide by DPR.
+  let cssX = x, cssY = y;
+  if (coords_are === 'screenshot_pixels') {
+    const vp = await getViewport();
+    const dpr = vp.devicePixelRatio || 1;
+    cssX = x / dpr;
+    cssY = y / dpr;
+  }
+
   const c = await getClient();
   const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
   const btnNum = btn === 'right' ? 2 : btn === 'middle' ? 1 : 0;
-  await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
-  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 1 });
-  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
+  await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x: cssX, y: cssY });
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: cssX, y: cssY, button: btn, buttons: btnNum, clickCount: 1 });
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: cssX, y: cssY, button: btn });
   if (double_click) {
     await new Promise(r => setTimeout(r, 50));
-    await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 2 });
-    await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
+    await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: cssX, y: cssY, button: btn, buttons: btnNum, clickCount: 2 });
+    await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: cssX, y: cssY, button: btn });
   }
-  return { success: true, x, y, button: btn, double_click: !!double_click };
+  return {
+    success: true,
+    x: cssX,
+    y: cssY,
+    coords_are: coords_are || 'css',
+    input_x: x,
+    input_y: y,
+    button: btn,
+    double_click: !!double_click,
+  };
+}
+
+/**
+ * Composite: hover over a trigger element, wait for a target to appear, click it.
+ * Useful for menus that only render their items on hover.
+ *  - hoverBy/hoverValue: trigger to hover
+ *  - clickBy/clickValue: target to click (waits up to wait_ms for it)
+ */
+export async function hoverAndClick({ hover_by, hover_value, click_by, click_value, wait_ms = 1000 }) {
+  await hover({ by: hover_by, value: hover_value });
+  // Small settle delay before polling — hover-driven menus animate in
+  await new Promise(r => setTimeout(r, 100));
+  return click({ by: click_by, value: click_value, wait_ms, retries: 1 });
+}
+
+/**
+ * Drag from (fromX, fromY) to (toX, toY) with interpolated mouseMoved events.
+ * Useful for chart drawing tools (trend lines, rectangles) and scroll/pan operations.
+ */
+export async function drag({ from_x, from_y, to_x, to_y, button, steps, coords_are }) {
+  let fX = from_x, fY = from_y, tX = to_x, tY = to_y;
+  if (coords_are === 'screenshot_pixels') {
+    const vp = await getViewport();
+    const dpr = vp.devicePixelRatio || 1;
+    fX /= dpr; fY /= dpr; tX /= dpr; tY /= dpr;
+  }
+  const c = await getClient();
+  const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
+  const btnNum = btn === 'right' ? 2 : btn === 'middle' ? 1 : 0;
+  const stepCount = Math.max(2, Math.min(steps || 20, 100));
+
+  await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x: fX, y: fY });
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: fX, y: fY, button: btn, buttons: btnNum, clickCount: 1 });
+  for (let i = 1; i <= stepCount; i++) {
+    const t = i / stepCount;
+    const ix = fX + (tX - fX) * t;
+    const iy = fY + (tY - fY) * t;
+    await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x: ix, y: iy, button: btn, buttons: btnNum });
+  }
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: tX, y: tY, button: btn });
+  return {
+    success: true,
+    from: { x: fX, y: fY },
+    to: { x: tX, y: tY },
+    coords_are: coords_are || 'css',
+    steps: stepCount,
+  };
 }
 
 export async function findElement({ query, strategy }) {

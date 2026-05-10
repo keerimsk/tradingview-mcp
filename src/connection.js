@@ -61,11 +61,16 @@ export async function getClient() {
   return connect();
 }
 
-export async function connect() {
+/**
+ * Connect (or reconnect) the global CDP client.
+ * @param {string} [preferredId] — bind to this specific target id if it exists
+ *   in /json/list. Falls back to the first matching TradingView chart tab.
+ */
+export async function connect(preferredId) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const target = await findChartTarget();
+      const target = await findChartTarget(preferredId);
       if (!target) {
         throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
       }
@@ -87,10 +92,46 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
-async function findChartTarget() {
+/**
+ * Disconnect the current client and reconnect bound to a specific target id.
+ * Used by tab management to actually switch which renderer the MCP server is
+ * driving when the user changes tabs in TradingView Desktop.
+ *
+ * Returns metadata about the new binding (id, url, fell_back).
+ */
+export async function setActiveTarget(targetId) {
+  if (!targetId) throw new Error('setActiveTarget requires a target id');
+  await disconnect();
+  await connect(targetId);
+  return {
+    bound_target_id: targetInfo?.id || null,
+    requested_target_id: targetId,
+    fell_back: targetInfo?.id !== targetId,
+    url: targetInfo?.url || null,
+  };
+}
+
+/**
+ * Return the id of the target the current client is bound to, or null if
+ * not yet connected.
+ */
+export function getActiveTargetId() {
+  return targetInfo?.id || null;
+}
+
+/**
+ * Find a TradingView chart target on the CDP debugger.
+ * @param {string} [preferredId] — return this id if it exists; otherwise
+ *   fall back to the first matching chart tab.
+ */
+export async function findChartTarget(preferredId) {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
+  if (preferredId) {
+    const exact = targets.find(t => t.type === 'page' && t.id === preferredId);
+    if (exact) return exact;
+    // Preferred not found — fall through to default selection (first chart tab)
+  }
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;

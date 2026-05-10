@@ -4,6 +4,7 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { dismissIfPresent } from './dialog.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -290,13 +291,16 @@ export async function compile() {
       var btns = document.querySelectorAll('button');
       var fallback = null;
       var saveBtn = null;
+      // Accept either "Add to chart" / "Update on chart" or the doubled-text
+      // form ("Add to chartAdd to chart") that comes from icon+label spans.
+      var fallbackRe = /^((add to chart)+|(update on chart)+)$/i;
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
         if (/save and add to chart/i.test(text)) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
+        if (!fallback && fallbackRe.test(text)) {
           fallback = btns[i];
         }
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
@@ -344,36 +348,165 @@ export async function getErrors() {
   };
 }
 
-export async function save() {
+/**
+ * Read the currently-loaded Pine script's identity from the editor toolbar.
+ * Returns:
+ *   - scriptName:     visible script title (e.g. "SMC Structure + FVG", "Untitled")
+ *   - isUntitled:     true if the editor is not bound to a saved script slot
+ *   - hasUnsavedChanges: true if the save button shows a dirty marker
+ *
+ * No scriptIdPart available from the DOM — TV exposes only the name. Callers
+ * doing strict overwrite guards should compare on scriptName.
+ *
+ * Returns { ready: false } when the Pine Editor panel is not present (caller
+ * decides whether that's an error or to open it first).
+ */
+export async function getLoadedScriptInfo() {
+  const info = await evaluate(`
+    (function() {
+      var nameBtn = document.querySelector('[class*="nameButton-"]');
+      var saveBtn = document.querySelector('[class*="saveButton-"]');
+      var monaco = document.querySelector('.monaco-editor.pine-editor-monaco');
+      if (!nameBtn || !monaco) {
+        return { ready: false, monacoFound: !!monaco, nameButtonFound: !!nameBtn };
+      }
+      var name = (nameBtn.textContent || '').trim();
+      // TV's save button toggles classes: 'saved-...' = no unsaved changes,
+      // 'hidden-...' = hidden (no work to save). Either means clean.
+      var saveCls = saveBtn ? (saveBtn.className || '') : '';
+      var isClean = /\\bsaved-|\\bhidden-/.test(saveCls);
+      // "Untitled" naming or empty title means no bound script slot.
+      var isUntitled = !name || /^untitled/i.test(name);
+      return {
+        ready: true,
+        scriptName: name || null,
+        isUntitled: isUntitled,
+        hasUnsavedChanges: !isClean,
+      };
+    })()
+  `);
+  return { success: true, ...info };
+}
+
+/**
+ * Pure: decide whether a save is allowed given the loaded script's state and
+ * the caller's guard parameters. Throws with a descriptive error if not.
+ * Exported so unit tests can validate the policy without a live CDP connection.
+ *
+ *   loadedInfo = { ready, scriptName, isUntitled, hasUnsavedChanges }
+ *   guard = {
+ *     expected_untitled?: boolean,   // require editor to be on a fresh untitled script
+ *     expected_name?: string,        // require loaded script's name to match
+ *     force?: boolean,               // bypass all checks
+ *   }
+ *
+ * Default behavior (no guard params): treat as expected_untitled:true — the
+ * safest mode. Callers that mean to overwrite a known saved script must opt
+ * in via expected_name or force.
+ */
+export function evaluateSaveGuard(loadedInfo, guard = {}, action = 'save') {
+  if (guard?.force) return { skipped: true, reason: 'force' };
+  if (!loadedInfo?.ready) {
+    return { skipped: true, reason: 'editor_not_ready' };
+  }
+
+  const wantsUntitled = guard?.expected_untitled === true
+    || (guard?.expected_untitled !== false && !guard?.expected_name);
+  const expectedName = guard?.expected_name;
+
+  if (expectedName) {
+    if ((loadedInfo.scriptName || '').trim() !== String(expectedName).trim()) {
+      throw new Error(
+        `Refusing to ${action}: editor has loaded script "${loadedInfo.scriptName || 'Untitled'}" ` +
+          `but caller expected name="${expectedName}". ` +
+          `Pass expected_name="${loadedInfo.scriptName}" to confirm overwrite, or force:true to bypass.`,
+      );
+    }
+    return { matched: 'expected_name', scriptName: loadedInfo.scriptName };
+  }
+
+  if (wantsUntitled && !loadedInfo.isUntitled) {
+    throw new Error(
+      `Refusing to ${action}: editor has loaded saved script "${loadedInfo.scriptName}" ` +
+        `but caller expected untitled. Call pine_new first to create a fresh untitled script, ` +
+        `or pass expected_name="${loadedInfo.scriptName}" to confirm overwrite, ` +
+        `or force:true to bypass.`,
+    );
+  }
+  return { matched: wantsUntitled ? 'expected_untitled' : 'no_check', scriptName: loadedInfo.scriptName };
+}
+
+/**
+ * Internal: read live editor state, then run evaluateSaveGuard. Wraps the
+ * CDP call so save() / smartCompile() don't repeat themselves.
+ */
+async function enforceSaveGuard(guard = {}, action = 'save') {
+  if (guard?.force) return { skipped: true, reason: 'force' };
+  const info = await getLoadedScriptInfo();
+  return evaluateSaveGuard(info, guard, action);
+}
+
+/**
+ * Close (minimize) the bottom widget bar — collapses Pine Editor / Strategy
+ * Tester / etc. so they're not visually in the way after save/compile.
+ * Idempotent and safe to call when nothing's open.
+ */
+export async function closeBottomPanel() {
+  const result = await evaluate(`
+    (function() {
+      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+      if (!bwb) return { success: false, reason: 'no_bwb' };
+      try {
+        if (bwb._mode && typeof bwb._mode.setValue === 'function') {
+          bwb._mode.setValue('minimized');
+          return { success: true, method: '_mode.setValue("minimized")' };
+        }
+        if (typeof bwb.toggleMinimize === 'function') {
+          bwb.toggleMinimize();
+          return { success: true, method: 'toggleMinimize' };
+        }
+        if (typeof bwb.hide === 'function') {
+          bwb.hide();
+          return { success: true, method: 'hide' };
+        }
+        return { success: false, reason: 'no_close_method' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    })()
+  `);
+  return result;
+}
+
+export async function save({ expected_untitled, expected_name, force, close_after = true } = {}) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const guardResult = await enforceSaveGuard({ expected_untitled, expected_name, force }, 'save');
 
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
   await new Promise(r => setTimeout(r, 800));
 
-  // Handle "Save Script" name dialog that appears for new/unsaved scripts
-  const dialogHandled = await evaluate(`
-    (function() {
-      var saveBtn = null;
-      var btns = document.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (text === 'Save' && btns[i].offsetParent !== null) {
-          // Check if it's in a dialog (not the Pine Editor save button)
-          var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
-          if (parent) { saveBtn = btns[i]; break; }
-        }
-      }
-      if (saveBtn) { saveBtn.click(); return true; }
-      return false;
-    })()
-  `);
+  // For new/unsaved scripts a "Save Script" name dialog appears — confirm it.
+  const dialog = await dismissIfPresent({ intents: ['save', 'confirm'] });
+  if (dialog.dismissed) await new Promise(r => setTimeout(r, 500));
 
-  if (dialogHandled) await new Promise(r => setTimeout(r, 500));
+  // Optionally collapse the bottom panel so the editor isn't visually in the
+  // way after save (default true — user typically wants to see the chart).
+  let closeResult = null;
+  if (close_after) {
+    closeResult = await closeBottomPanel();
+  }
 
-  return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
+  return {
+    success: true,
+    action: dialog.dismissed ? 'saved_with_dialog' : 'Ctrl+S_dispatched',
+    dialog_button: dialog.clicked || null,
+    guard: guardResult,
+    panel_closed: close_after ? !!closeResult?.success : false,
+  };
 }
 
 export async function getConsole() {
@@ -426,9 +559,14 @@ export async function getConsole() {
   return { success: true, entries: entries || [], entry_count: entries?.length || 0 };
 }
 
-export async function smartCompile() {
+export async function smartCompile({ expected_untitled, expected_name, force, close_after = true } = {}) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  // Save guard: smartCompile may click "Save and add to chart" or trigger Ctrl+S
+  // which can overwrite the loaded saved script. Apply the same strict-by-default
+  // protection as save().
+  const guardResult = await enforceSaveGuard({ expected_untitled, expected_name, force }, 'smart_compile');
 
   const studiesBefore = await evaluate(`
     (function() {
@@ -446,14 +584,18 @@ export async function smartCompile() {
       var addBtn = null;
       var updateBtn = null;
       var saveBtn = null;
+      // TV's button has icon+label spans which both produce "Add to chart" in
+      // textContent — so the regex accepts the literal text once OR doubled.
+      var addRe = /^(add to chart)+$/i;
+      var updateRe = /^(update on chart)+$/i;
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
         if (/save and add to chart/i.test(text)) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
+        if (!addBtn && addRe.test(text)) addBtn = btns[i];
+        if (!updateBtn && updateRe.test(text)) updateBtn = btns[i];
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
       }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
@@ -496,42 +638,180 @@ export async function smartCompile() {
 
   const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
 
+  // Collapse the bottom panel so the chart is fully visible after add.
+  let closeResult = null;
+  if (close_after) {
+    closeResult = await closeBottomPanel();
+  }
+
   return {
     success: true,
     button_clicked: buttonClicked || 'keyboard_shortcut',
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
+    guard: guardResult,
+    panel_closed: close_after ? !!closeResult?.success : false,
   };
 }
 
-export async function newScript({ type }) {
+/**
+ * Create a fresh untitled Pine script in the editor.
+ *
+ * Flow:
+ *   1. Read the currently loaded script. If it has unsaved changes, refuse
+ *      (would silently lose user work). Caller can pass force_discard:true
+ *      to override.
+ *   2. Click TV's script-name dropdown (the title element next to the
+ *      editor) to open the script-management menu.
+ *   3. Click the "Create new" menu item — TV detaches the loaded scriptId
+ *      and starts a fresh untitled session.
+ *   4. If a "Save changes?" dialog appears, dismiss with discard intent
+ *      (only safe because step 1 already verified no unsaved changes).
+ *   5. Re-read state to verify the editor is now untitled. If not, throw.
+ *   6. Optionally seed the editor with a starter template.
+ *
+ * Output guarantees: when this returns success, the editor is on a fresh
+ * untitled script slot — a subsequent save() creates a NEW saved entry,
+ * never overwrites an existing one.
+ */
+export async function newScript({ kind = 'indicator', type, source, force_discard = false } = {}) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
+  // Backwards-compat: callers used `type` before; accept either.
+  const scriptKind = kind || type || 'indicator';
+
+  // Step 1: check current state
+  const before = await getLoadedScriptInfo();
+  if (!before.ready) {
+    throw new Error('Pine Editor not ready (Monaco or script-name button not found).');
+  }
+  if (before.hasUnsavedChanges && !force_discard) {
+    throw new Error(
+      `Refusing to create new script: editor has unsaved changes on "${before.scriptName}". ` +
+        `Save them with pine_save (passing expected_name="${before.scriptName}"), ` +
+        `or call pine_new again with force_discard:true to discard.`,
+    );
+  }
+
+  // Step 2: open the script-name dropdown
+  const opened = await evaluate(`
+    (function() {
+      var btn = document.querySelector('[class*="nameButton-"]');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    })()
+  `);
+  if (!opened) {
+    throw new Error('Could not find Pine Editor script-name button. UI selector may have changed.');
+  }
+  await new Promise(r => setTimeout(r, 500));
+
+  // Step 3: hover on "Create new" — opens a submenu with kind options.
+  // Critical: clicking is NOT enough; the submenu only appears on hover.
+  // Use CDP Input.dispatchMouseEvent to dispatch a real mouseMoved event.
+  const createNewRect = await evaluate(`
+    (function() {
+      var nodes = document.querySelectorAll('[class*="button-HZXWyU6m"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        if (!n.offsetParent) continue;
+        var t = (n.textContent || '').trim();
+        if (t === 'Create new') {
+          var r = n.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
+      }
+      return null;
+    })()
+  `);
+  if (!createNewRect) {
+    await evaluate('document.body.click()');
+    throw new Error('Could not find "Create new" menu item in script-name dropdown.');
+  }
+  // Hover to open submenu
+  const mouseClient = await getClient();
+  await mouseClient.Input.dispatchMouseEvent({ type: 'mouseMoved', x: createNewRect.x, y: createNewRect.y });
+  await new Promise(r => setTimeout(r, 600));
+
+  // Step 3b: pick the kind from the submenu. Submenu items appear after
+  // the hover; their text reads "IndicatorCtrl + K, Ctrl + I" etc.
+  const kindLabel = scriptKind === 'strategy' ? 'Strategy'
+    : scriptKind === 'library' ? 'Library'
+    : 'Indicator';
+  const kindRect = await evaluate(`
+    (function() {
+      var label = ${JSON.stringify(kindLabel)};
+      var nodes = document.querySelectorAll('[class*="button-HZXWyU6m"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        if (!n.offsetParent) continue;
+        var t = (n.textContent || '').trim();
+        if ((t === label || t.indexOf(label) === 0) && t !== 'Create new') {
+          var r = n.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: t.substring(0, 60) };
+        }
+      }
+      return null;
+    })()
+  `);
+  if (!kindRect) {
+    await evaluate('document.body.click()');
+    throw new Error(
+      `Could not find "${kindLabel}" item in Create new submenu. ` +
+        `Hover did not produce submenu — TV layout may have changed. Try ui_screen_inspect to diagnose.`,
+    );
+  }
+  // Move to the submenu item then click via CDP mouse events
+  await mouseClient.Input.dispatchMouseEvent({ type: 'mouseMoved', x: kindRect.x, y: kindRect.y });
+  await new Promise(r => setTimeout(r, 100));
+  await mouseClient.Input.dispatchMouseEvent({ type: 'mousePressed', x: kindRect.x, y: kindRect.y, button: 'left', clickCount: 1 });
+  await mouseClient.Input.dispatchMouseEvent({ type: 'mouseReleased', x: kindRect.x, y: kindRect.y, button: 'left' });
+  await new Promise(r => setTimeout(r, 800));
+
+  // Step 4: handle "Save changes?" dialog if it appears (we already checked
+  // for unsaved changes; if a dialog still pops, discard is safe).
+  await dismissIfPresent({ intents: ['discard', 'cancel'] });
+  await new Promise(r => setTimeout(r, 400));
+
+  // Step 5: verify untitled state
+  const after = await getLoadedScriptInfo();
+  if (!after.ready) {
+    throw new Error('Pine Editor lost readiness after Create new click.');
+  }
+  if (!after.isUntitled) {
+    throw new Error(
+      `Failed to transition to untitled state — editor still shows "${after.scriptName}". ` +
+        `Refusing to setValue() to avoid overwriting it.`,
+    );
+  }
+
+  // Step 6: optionally seed with a template
   const templates = {
     indicator: '//@version=6\nindicator("My script")\nplot(close)',
     strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
     library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
   };
+  const seed = source !== undefined ? source : (templates[scriptKind] || templates.indicator);
+  if (seed) {
+    const escaped = JSON.stringify(seed);
+    await evaluate(`
+      (function() {
+        var m = ${FIND_MONACO};
+        if (m) m.editor.setValue(${escaped});
+      })()
+    `);
+  }
 
-  const template = templates[type] || templates.indicator;
-
-  // Simply set the source to a new template — this is the most reliable approach
-  const escaped = JSON.stringify(template);
-  const set = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
-    })()
-  `);
-
-  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
-
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  return {
+    success: true,
+    action: 'new_script_created',
+    kind: scriptKind,
+    was_loaded: before.scriptName,
+    now: 'untitled',
+  };
 }
 
 export async function openScript({ name }) {

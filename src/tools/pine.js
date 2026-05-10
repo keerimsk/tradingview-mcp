@@ -25,27 +25,64 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_save', 'Save the current Pine Script (Ctrl+S)', {}, async () => {
-    try { return jsonResult(await core.save()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  server.tool(
+    'pine_save',
+    'Save the current Pine Script (Ctrl+S). STRICT-BY-DEFAULT: refuses to save unless the editor is on a fresh untitled script slot, to prevent silently overwriting an unrelated saved script. To save updates to an existing script, pass expected_name="<exact loaded name>" or force:true. Collapses the Pine Editor panel after save by default (close_after).',
+    {
+      expected_untitled: z.coerce.boolean().optional().describe('Require editor to be on an untitled script (default: implied true when no other guard given)'),
+      expected_name: z.string().optional().describe('Require currently-loaded script name to match this (overrides expected_untitled)'),
+      force: z.coerce.boolean().optional().describe('Bypass all guards (use with care — can overwrite scripts)'),
+      close_after: z.coerce.boolean().optional().describe('Collapse the bottom Pine Editor panel after save (default true)'),
+    },
+    async (args) => {
+      try { return jsonResult(await core.save(args)); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
+  server.tool(
+    'pine_get_loaded_info',
+    'Read the Pine Editor toolbar to identify the currently-loaded script: scriptName, isUntitled, hasUnsavedChanges. Useful before pine_save to verify which script is about to be written.',
+    {},
+    async () => {
+      try { return jsonResult(await core.getLoadedScriptInfo()); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
 
   server.tool('pine_get_console', 'Read Pine Script console/log output (compile messages, log.info(), errors)', {}, async () => {
     try { return jsonResult(await core.getConsole()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes', {}, async () => {
-    try { return jsonResult(await core.smartCompile()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  server.tool(
+    'pine_smart_compile',
+    'Intelligent compile: detects button, compiles, checks errors, reports study changes. STRICT-BY-DEFAULT save guard. Collapses Pine Editor panel after add-to-chart by default (close_after).',
+    {
+      expected_untitled: z.coerce.boolean().optional().describe('Require editor to be on an untitled script (default: implied true when no other guard given)'),
+      expected_name: z.string().optional().describe('Require currently-loaded script name to match this'),
+      force: z.coerce.boolean().optional().describe('Bypass all guards'),
+      close_after: z.coerce.boolean().optional().describe('Collapse the bottom Pine Editor panel after compile (default true)'),
+    },
+    async (args) => {
+      try { return jsonResult(await core.smartCompile(args)); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
-    type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
-  }, async ({ type }) => {
-    try { return jsonResult(await core.newScript({ type })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  server.tool(
+    'pine_new',
+    'Create a fresh untitled Pine script in the editor by clicking TV\'s "Create new" menu item — properly detaches any loaded script so the next save creates a NEW entry instead of overwriting. Refuses to proceed if the editor has unsaved changes (pass force_discard:true to override).',
+    {
+      kind: z.enum(['indicator', 'strategy', 'library']).optional().describe('Script kind (default indicator)'),
+      source: z.string().optional().describe('Optional starter source code (default: a minimal template)'),
+      force_discard: z.coerce.boolean().optional().describe('Discard unsaved changes in current script (default false → refuse with error)'),
+    },
+    async ({ kind, source, force_discard }) => {
+      try { return jsonResult(await core.newScript({ kind, source, force_discard })); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
 
   server.tool('pine_open', 'Open a saved Pine Script by name', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),

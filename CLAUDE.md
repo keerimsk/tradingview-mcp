@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-97 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+116 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -42,14 +42,25 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `chart_set_visible_range` → zoom to exact date range (unix timestamps)
 
 ### "Work on Pine Script"
-1. `pine_set_source` → inject code into editor
-2. `pine_smart_compile` → compile with auto-detection + error check
-3. `pine_get_errors` → read compilation errors
-4. `pine_get_console` → read log.info() output
-5. `pine_get_source` → read current code back (WARNING: can be very large for complex scripts)
-6. `pine_save` → save to TradingView cloud
-7. `pine_new` → create blank indicator/strategy/library
-8. `pine_open` → load a saved script by name
+
+**Safe write flow (DO NOT skip steps):** TV Pine Editor binds the editor to a single saved-script slot. A blind Ctrl+S writes to whatever script is currently loaded — risk of overwriting the user's existing indicator. The tools enforce strict-by-default guards.
+
+1. `pine_get_loaded_info` → see what's currently loaded (`scriptName`, `isUntitled`, `hasUnsavedChanges`)
+2. `pine_new kind:"indicator"` → properly detach + create fresh untitled (refuses if unsaved changes; pass `force_discard:true` only when intentional)
+3. `pine_set_source source:"..."` → inject your Pine code
+4. `pine_smart_compile` → compiles + adds to chart. Strict-by-default save guard: passes only on untitled state. If you're updating a saved script, pass `expected_name:"<exact loaded name>"` or `force:true`.
+5. `pine_save` → same strict guard. Pass `expected_name` to update an existing script, or omit (default = untitled-only).
+
+**Read flow:**
+- `pine_get_errors` → compilation markers
+- `pine_get_console` → log.info() output
+- `pine_get_source` → current editor source (WARNING: 200KB+ for complex scripts; avoid unless editing)
+- `pine_open name:"X"` → load a saved script by name
+- `pine_list_scripts` → list saved scripts
+
+**Static/offline checks (no chart needed):**
+- `pine_analyze` → static analysis (array OOB, unguarded array.first(), bad loops, implicit bool)
+- `pine_check` → server-side compile validation
 
 ### "Practice trading with replay"
 1. `replay_start` with `date: "2025-03-01"` → enter replay mode
@@ -61,6 +72,40 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
+
+### "Read TradingView news"
+
+`news_headlines` and `news_get_story` hit `news-headlines.tradingview.com` via the user's session cookies — same general feed as TV's right-panel news widget.
+
+- `news_headlines` → general feed (default 50 items)
+- `news_headlines symbol:"NASDAQ:AAPL"` → symbol-specific (Apple-related news)
+- Each item: `{id, title, source, published, published_iso, related_symbols, story_path}`
+- `news_get_story id:"<from headlines>"` → full plaintext + short_description
+- No chart side-effects — pure REST data fetch
+
+### "Screener / Tarayıcı (whole-market filter)"
+
+**Classic Screener (REST, fast):** scans the whole market against any combination of fundamentals/price/technicals.
+1. `screener_columns` → see column names (RSI, market_cap_basic, sector, P/E, etc.)
+2. `screener_operations` → see filter ops (greater, less, in_range, match, crosses_above, etc.)
+3. `screener_scan` with filters/columns/sort/range. Examples:
+   - Oversold US stocks: `market:"america" filters:[{field:"RSI",operation:"less",value:30}]`
+   - Mid-cap tech: `market:"america" filters:[{field:"market_cap_basic",operation:"egreater",value:2e9},{field:"sector",operation:"match",value:"Technology Services"}]`
+   - Large-cap crypto: `market:"crypto" filters:[{field:"market_cap_basic",operation:"egreater",value:1e9}] sort:{by:"market_cap_basic",order:"desc"}`
+4. `screener_active_list list_type:"most_active|gainers|losers|high_volume|52w_highs|52w_lows"` — preset filters for top-movers
+
+Markets: `america`, `crypto`, `forex`, `india`, `uk`, `germany`, `japan`, `turkey`, `brazil`, `canada`, `australia`, `france`, `spain`, `italy`, `china`, `hongkong`, `korea`, `mexico`, `cfd`, `global`. Range capped at 500 rows per call. **Does NOT touch chart indicators.**
+
+### "Run a Pine indicator across many symbols (Pine Screener)"
+
+Pine Screener runs a saved Pine indicator against a scan list and returns per-symbol outputs. Premium/Ultimate. UI-orchestrated; reliability depends on TV's panel layout.
+
+1. `pine_screener_open` → open the bottom panel
+2. `pine_screener_run script_name:"My RSI Alert" scan_list:"All US Stocks" max_rows:50` → end-to-end: select script + list, run, scrape table
+3. `pine_screener_status` → progress / row count while running
+4. `pine_screener_close` → close panel
+
+If table scraping fails, the result includes `fallback.file_path` to an annotated screenshot for manual diagnosis. **Does NOT add the script as a chart indicator.**
 
 ### "Draw on the chart"
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)
@@ -134,14 +179,51 @@ If chart_set_timeframe returns `success: false` with "Symbol does not support", 
 
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading
-- `ui_click` → click buttons by aria-label, text, or data-name
+- `ui_click` → click buttons by aria-label, text, or data-name. Optional `wait_ms`/`retries`/`wait_after_ms` for flaky targets. Walks open shadow roots.
+- `ui_set_checkbox` → idempotent toggle (reads current state, only clicks if mismatched)
+- `ui_hover_and_click` → hover trigger then click target (for hover-revealed menus)
+- `ui_drag` → drag from→to with interpolation (chart drawing, pan)
+- `ui_dialog` → describe / click_button (by intent or label) / dismiss the active modal
 - `layout_switch` → load a saved layout by name
 - `ui_fullscreen` → toggle fullscreen
-- `capture_screenshot` → take a screenshot (regions: "full", "chart", "strategy_tester")
+- `capture_screenshot` → screenshot (regions: full/chart/strategy_tester). `return_inline:true` returns PNG inline as MCP image content for vision workflows.
+- `ui_screen_inspect` → annotated screenshot (grid + clickable bounding boxes, inline) — vision fallback
+
+### "UI'da takıldığında — çözüm sırası"
+When DOM-based selectors fail, escalate in this order:
+
+1. **Dialog kontrolü:** `ui_dialog action:"describe"` — aktif modal var mı? Varsa `ui_dialog action:"click_button" intent:"discard|cancel|confirm|save"`
+2. **Wait + retry:** `ui_click` çağrısına `wait_ms:2000, retries:2` ekle — element geç render oluyor olabilir
+3. **Hover-trigger:** Element hover ile beliriyor mu? `ui_hover_and_click hover_value:"..." click_value:"..."`
+4. **Bounding box:** `ui_find_element query:"..."` — hangi elementler nerede? Koordinat döner.
+5. **Vision fallback (DOM çözümlenemiyorsa):**
+   - `ui_screen_inspect` → annotated screenshot (grid + clickable bounding boxes, inline)
+   - Screenshot'tan koordinat tahmin et
+   - `ui_mouse_click x:.. y:.. coords_are:"screenshot_pixels"` → DPR otomatik kalibrasyon
+6. **Son çare:** `ui_evaluate expression:"..."` — sayfa context'inde rastgele JS
 
 ### "TradingView isn't running"
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
+
+### "Multiple chart tabs open"
+
+TradingView Desktop can have many tabs open at once; each tab is its own CDP target. The MCP CDP client is bound to one target at a time, so switching tabs requires both a visual switch AND a client rebind — these tools handle both:
+
+- `tab_list` → see every tab; each entry has `is_bound:true` for the one MCP is currently driving
+- `tab_get_active` → "which tab am I on?" — returns id, index, url, chart_id of the bound tab
+- `tab_switch index:N` → activate tab N visually + rebind the CDP client. Subsequent `chart_*`, `data_*`, `pine_*`, `ui_*`, `capture_*` calls operate on the new tab.
+- `tab_new` → **best-effort** new tab. Returns honest error in TV Desktop (Electron blocks Ctrl+T to renderer and CDP Target.createTarget). Use the `tab_wait_for_new` workflow instead.
+- `tab_wait_for_new timeout_ms:30000` → polls until a new TradingView chart tab appears, then auto-binds. Use **after** manually pressing Ctrl+T or clicking the + tab button.
+- `tab_close` → close current tab (Ctrl+W / Cmd+W); if it was the bound one, MCP rebinds to first remaining tab
+
+**New-tab workflow (Electron limitation):**
+1. Call `tab_new` — likely returns error explaining Electron blocked it
+2. User (or you, via instructions) presses **Ctrl+T** in TradingView Desktop, or clicks the **+** button in the tab bar
+3. Call `tab_wait_for_new` — auto-detects the new tab and binds the MCP client to it
+4. Continue with `chart_set_symbol` etc. — all subsequent calls go to the new tab
+
+Always call `tab_get_active` (or check `is_bound` in `tab_list`) before issuing chart commands when working with multi-tab workspaces — confirms the MCP is talking to the tab the user expects.
 
 ## Context Management Rules
 

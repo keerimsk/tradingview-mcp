@@ -4,3 +4,24 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Claude Code session metadata (per-machine)
+.claude/
+
+# Local sweep result artifacts
+__sweep_results.json
+__diag_*.png
+__tv_*.png
+__test_*.mjs
+__verify_*.mjs
+__diag.mjs
+__discover.mjs
+__feature_sweep.mjs
+__full_sweep.mjs
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

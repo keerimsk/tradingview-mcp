@@ -56,16 +56,20 @@ See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
 
 Gives your AI assistant eyes and hands on your own chart:
 
-- **Pine Script development** — write, inject, compile, debug, and iterate on scripts with AI assistance
-- **Chart navigation** — change symbols, timeframes, zoom to dates, add/remove indicators
-- **Visual analysis** — read your chart's indicator values, price levels, and annotations
-- **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
-- **Manage alerts** — create, list, and delete price alerts
+- **Pine Script development** — write, inject, compile, debug, iterate. Strict-by-default save guards prevent accidentally overwriting your existing indicators.
+- **Chart navigation** — change symbols, timeframes, scroll to dates, add/remove indicators
+- **Visual analysis** — read indicator values, price levels, annotations from any visible Pine indicator
+- **Multi-tab orchestration** — open new chart tabs end-to-end automated (Ctrl+T at OS level → "Create new layout" click → name dialog → symbol set), CDP rebinding correctly tracks bound tab
+- **Vision-based UI control** — annotated screenshots (grid + clickable bounding boxes) returned inline so the model can drive UI by pixel coordinates when DOM selectors fail
+- **Modal/dialog management** — describe / click-by-intent / dismiss any visible TradingView modal
+- **Screener integration** — full whole-market REST scan (50+ countries, 500+ filters), 6 preset top-mover lists (gainers/losers/most_active/etc.), Pine Screener UI driver
+- **News feed** — TradingView news REST integration, per-symbol or general headlines, full-text article fetch
 - **Replay practice** — step through historical bars, practice entries/exits
-- **Screenshots** — capture chart state for AI visual analysis
-- **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
-- **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
-- **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
+- **Drawing & alerts** — shapes, levels, price alerts CRUD
+- **Screenshots** — capture chart state, with inline-image mode for vision workflows
+- **Multi-pane layouts** — set up 2x2, 3x1 grids with different symbols per pane
+- **Monitor your chart** — stream JSONL from your locally running chart for monitoring scripts
+- **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
 ## Install with Claude Code
@@ -224,8 +228,16 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "What strategies are on the chart?" | `strategy_list` |
 | "Set commission to 0.1% and re-run" | `strategy_set_settings` → `strategy_get_performance_summary` |
 | "What's my Sharpe ratio?" | `strategy_get_risk_ratios` |
+| "Open BTCUSDT in a new tab" | `tab_new auto_navigate_to:"BINANCE:BTCUSDT"` |
+| "Show me oversold US stocks" | `screener_scan market:"america" filters:[{field:"RSI",operation:"less",value:30}]` |
+| "Top gainers today?" | `screener_active_list list_type:"gainers"` |
+| "Latest news on Apple?" | `news_headlines symbol:"NASDAQ:AAPL"` |
+| "Read this news article" | `news_get_story id:"<from headlines>"` |
+| "Click that button on screen" (when DOM fails) | `ui_screen_inspect` → `ui_mouse_click coords_are:"screenshot_pixels"` |
+| "Save my Pine indicator without overwriting old one" | `pine_new` → `pine_set_source` → `pine_smart_compile` (strict-by-default refuses to overwrite) |
+| "Dismiss this 'Save changes?' dialog" | `ui_dialog action:"click_button" intent:"discard"` |
 
-## Tool Reference (97 MCP tools)
+## Tool Reference (116 MCP tools)
 
 ### Chart Reading
 
@@ -348,6 +360,118 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `strategy_get_risk_ratios` | Risk Ratios (Sharpe, Sortino, Profit Factor, Calmar) |
 | `strategy_set_active` | Pick active strategy when multiple on chart |
 
+### Screener (whole-market filter, REST)
+
+Hits `scanner.tradingview.com` via the user's session cookies — no chart side-effects.
+
+| Tool | What it does |
+|------|-------------|
+| `screener_scan` | Run a scan over any market (america/crypto/forex/india/uk/turkey/germany/japan/global). 500+ filterable columns (P/E, RSI, market_cap_basic, sector, ...). Up to 500 rows per call. |
+| `screener_columns` | List 50+ common columns with descriptions |
+| `screener_operations` | List filter ops: `greater`, `less`, `egreater`, `in_range`, `match`, `crosses_above`, etc. |
+| `screener_active_list` | Preset Top Movers: `most_active`, `gainers`, `losers`, `high_volume`, `52w_highs`, `52w_lows` |
+
+Examples:
+```
+screener_scan market:"america" filters:[{field:"RSI",operation:"less",value:30}]   # oversold US
+screener_active_list list_type:"gainers" range:[0,20]                              # top 20 gainers
+screener_scan market:"crypto" sort:{by:"market_cap_basic",order:"desc"}            # top crypto
+```
+
+### Pine Screener (UI-driven, Premium/Ultimate)
+
+| Tool | What it does |
+|------|-------------|
+| `pine_screener_open` / `pine_screener_close` | Open / close TradingView's Screener side panel |
+| `pine_screener_status` | Read current state: panel_open, screen_name, filter pill count, row count |
+| `pine_screener_run screen_name:"My Pine Screen"` | Switch to a saved Pine screen + scrape result table |
+
+### News Feed (REST)
+
+Hits `news-headlines.tradingview.com` via session cookies. No chart side-effects.
+
+| Tool | What it does |
+|------|-------------|
+| `news_headlines` | General feed (default 50 items) — pass `symbol:"NASDAQ:AAPL"` for symbol-specific |
+| `news_get_story id:"<from headlines>"` | Full article text (AST → plaintext) + short description |
+
+### Multi-Tab (CDP target binding + OS-level new tab)
+
+| Tool | What it does |
+|------|-------------|
+| `tab_list` | List all chart tabs with `is_bound:true` flag for current target |
+| `tab_get_active` | "Which tab am I on?" — returns id, index, url, chart_id of bound tab |
+| `tab_switch index:N` | Activate tab N visually + rebind CDP client. All subsequent calls go there. |
+| `tab_new auto_navigate_to:"BINANCE:AVAXUSDT.P"` | **Full automation:** OS-level Ctrl+T (PowerShell SendKeys / osascript / xdotool) → click "Create new layout" tile → type unique name → click "Create" → set symbol via CDP. End-to-end one call. |
+| `tab_wait_for_new` | Poll until a new tab appears + auto-bind. Use after manually pressing Ctrl+T (fallback when full auto fails). |
+| `tab_close` | Close current bound tab (rebinds to first remaining) |
+
+Multi-tab note: Each TV tab is its own CDP target. The MCP client binds to ONE target at a time. `tab_switch` correctly rebinds — without that, calls would silently land on the wrong tab.
+
+### Vision-based UI Control (when DOM selectors fail)
+
+| Tool | What it does |
+|------|-------------|
+| `capture_screenshot return_inline:true` | PNG returned inline as MCP image content (visible to the model) + viewport size + devicePixelRatio |
+| `ui_screen_inspect` | Annotated screenshot — coordinate grid + bounding boxes around every clickable element |
+| `ui_mouse_click coords_are:"screenshot_pixels"` | Click at pixel coords from a screenshot, with automatic DPR calibration |
+| `ui_viewport` | Get viewport dimensions + devicePixelRatio for coordinate mapping |
+| `ui_drag from_x/y to_x/y` | Drag with interpolated mouseMoved events |
+
+### Dialog & Modal Management
+
+| Tool | What it does |
+|------|-------------|
+| `ui_dialog action:"describe"` | Detect topmost visible modal — returns title, buttons (with intent guess), checkboxes, inputs |
+| `ui_dialog action:"click_button" intent:"discard"` | Click button by semantic intent: `confirm/cancel/discard/save/ok/yes/no/close`. Each maps to a ranked list of button-text candidates ("Don't save", "Discard", "Open anyway" for `discard` etc.) |
+| `ui_dialog action:"dismiss"` | Auto-dismiss any visible dialog with discard/cancel intent |
+
+### Pine Editor Safety (strict-by-default save guards)
+
+`pine_save` and `pine_smart_compile` refuse to write unless the editor is on a fresh untitled script — preventing silent overwrites of user scripts. Pass `expected_name:"<exact loaded name>"` or `force:true` to opt into overwriting.
+
+| Tool | Safety |
+|------|--------|
+| `pine_get_loaded_info` | Read currently-loaded script: name, isUntitled, hasUnsavedChanges |
+| `pine_new kind:"indicator"` | **Real fresh untitled script** (clicks TV's "Create new" → submenu → kind option). Refuses if unsaved changes (force_discard:true to override). |
+| `pine_save` / `pine_smart_compile` | Strict-by-default. `expected_untitled:true` (default), `expected_name:"X"`, or `force:true`. `close_after:true` (default) collapses bottom panel after compile. |
+
+### Enhanced UI Tools
+
+| Tool | What it does |
+|------|-------------|
+| `ui_click` | DOM click with `wait_ms:N` polling + `retries:N` + shadow-DOM piercing |
+| `ui_set_checkbox label:"X" checked:true` | Idempotent toggle — reads state, only clicks if mismatched |
+| `ui_hover_and_click` | Composite: hover trigger + wait + click target (for hover-revealed menus) |
+| `ui_keyboard` / `ui_type_text` | Keystroke + text input |
+| `ui_evaluate` | Execute arbitrary JS in page context (escape hatch) |
+
+## Ultimate Plan Coverage
+
+How much of [TradingView Ultimate's feature surface](tradingview-ultimate-features.md) is reachable from this MCP:
+
+| Category | Coverage |
+|---|---|
+| Charts (read/control symbols, timeframes, types, replay, history, screenshots) | ✅ ~95% |
+| Pine Script (write/compile/save with safety, static analysis, server check, screener) | ✅ ~95% |
+| Strategy Tester (settings + performance/risk/trades) | ✅ 100% |
+| Premium chart features (Volume Profile, TPO, Footprint, Patterns, Bar Magnifier) | ✅ 100% (helper req) |
+| Screener (REST + presets) | ✅ 95% |
+| Multi-tab navigation (incl. OS-level new-tab automation) | ✅ 100% |
+| Vision-based UI control (annotated screenshots + DPR-aware coord clicks) | ✅ 90% |
+| Modal/dialog management | ✅ 95% |
+| News feed (general + symbol-specific + full article) | ✅ 95% |
+| Drawing tools (shape CRUD) | ✅ 90% |
+| Alerts (price + technical CRUD) | 🟡 50% (no webhooks, no multi-condition, no watchlist alerts) |
+| Watchlists (read + add) | 🟡 40% (no remove, no multi-list, no colors, no import/export) |
+| Live broker trading | ❌ 0% (replay paper trade only) |
+| Portfolios | ❌ 0% (TV portfolio service not wrapped) |
+| Economic / earnings calendar | ❌ 0% (CORS-blocked endpoints) |
+| Yield curves | 🟡 manual (symbol-based access) |
+| Social publishing (Pine publish, opinions, ideas) | ❌ 0% |
+
+See [TEST_REPORT.md](TEST_REPORT.md) for the full live-test matrix and ~95 verified tool calls.
+
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
@@ -382,7 +506,7 @@ The key flag: `--remote-debugging-port=9222`
 npm test
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+60+ unit tests covering: Pine Script static analysis, server-side compilation, CLI routing, dialog intent mapping, save-guard policy, screener payload shape, news input validation, tab list flag shape, multi-target reconnect logic. Plus comprehensive live sweep (~95 unique tool calls validated end-to-end against a running TradingView Desktop).
 
 ## Architecture
 
@@ -390,7 +514,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (97 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (116 tools) + CLI (`tv` command)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

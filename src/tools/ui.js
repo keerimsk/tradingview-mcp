@@ -3,15 +3,57 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
 
 export function registerUiTools(server) {
-  server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
+  server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring. Walks open shadow roots. Optional wait_ms polls for the element to appear; retries re-attempt the click if it failed; wait_after_ms holds before returning so the caller sees the post-click DOM.', {
     by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
     value: z.string().describe('Value to match against the chosen selector strategy'),
-  }, async ({ by, value }) => {
-    try { return jsonResult(await core.click({ by, value })); }
+    wait_ms: z.coerce.number().min(0).max(5000).optional().describe('Poll up to N ms for element to appear (default 0)'),
+    retries: z.coerce.number().min(0).max(3).optional().describe('Re-attempt click on failure (default 0)'),
+    wait_after_ms: z.coerce.number().min(0).max(2000).optional().describe('Wait N ms after click for UI to settle (default 0)'),
+  }, async ({ by, value, wait_ms, retries, wait_after_ms }) => {
+    try { return jsonResult(await core.click({ by, value, wait_ms, retries, wait_after_ms })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_open_panel', 'Open, close, or toggle TradingView panels (pine-editor, strategy-tester, watchlist, alerts, trading)', {
+  server.tool('ui_set_checkbox', 'Idempotently set a checkbox to checked/unchecked. Reads current state and only clicks if mismatched. Locates by visible label (associated <label for=...>, ancestor <label>, aria-label, or proximity), or by selector strategy.', {
+    label: z.string().optional().describe('Visible label text near the checkbox'),
+    by: z.enum(['aria-label', 'data-name', 'class-contains']).optional().describe('Alternative: selector strategy'),
+    value: z.string().optional().describe('Selector value (required if by is given)'),
+    checked: z.coerce.boolean().describe('Desired state'),
+  }, async ({ label, by, value, checked }) => {
+    try { return jsonResult(await core.setCheckbox({ label, by, value, checked })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('ui_hover_and_click', 'Composite: hover a trigger element, then click a target that appears after hover (e.g., menu items). Waits for the target up to wait_ms.', {
+    hover_by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Hover trigger selector strategy'),
+    hover_value: z.string().describe('Hover trigger value'),
+    click_by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Click target selector strategy'),
+    click_value: z.string().describe('Click target value'),
+    wait_ms: z.coerce.number().min(0).max(5000).optional().describe('Wait up to N ms for click target after hover (default 1000)'),
+  }, async ({ hover_by, hover_value, click_by, click_value, wait_ms }) => {
+    try { return jsonResult(await core.hoverAndClick({ hover_by, hover_value, click_by, click_value, wait_ms })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('ui_drag', 'Drag from (from_x, from_y) to (to_x, to_y) with interpolated mouseMoved events. Useful for chart drawing tools and pan operations. coords_are="screenshot_pixels" if coordinates were read off a screenshot at devicePixelRatio>1.', {
+    from_x: z.coerce.number().describe('Start X (CSS pixels by default)'),
+    from_y: z.coerce.number().describe('Start Y'),
+    to_x: z.coerce.number().describe('End X'),
+    to_y: z.coerce.number().describe('End Y'),
+    button: z.enum(['left', 'right', 'middle']).optional().describe('Mouse button (default left)'),
+    steps: z.coerce.number().min(2).max(100).optional().describe('Interpolation steps (default 20)'),
+    coords_are: z.enum(['css', 'screenshot_pixels']).optional().describe('Coordinate space (default css)'),
+  }, async ({ from_x, from_y, to_x, to_y, button, steps, coords_are }) => {
+    try { return jsonResult(await core.drag({ from_x, from_y, to_x, to_y, button, steps, coords_are })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('ui_viewport', 'Get the chart window viewport size and devicePixelRatio. Use to map screenshot pixels back to CSS coordinates for ui_mouse_click.', {}, async () => {
+    try { return jsonResult(await core.getViewport()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('ui_open_panel', 'Open, close, or toggle TradingView panels (pine-editor, strategy-tester, watchlist, alerts, trading). For the Screener panel use pine_screener_open instead.', {
     panel: z.enum(['pine-editor', 'strategy-tester', 'watchlist', 'alerts', 'trading']).describe('Panel name'),
     action: z.enum(['open', 'close', 'toggle']).describe('Action to perform'),
   }, async ({ panel, action }) => {
@@ -67,13 +109,14 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_mouse_click', 'Click at specific x,y coordinates on the TradingView window', {
-    x: z.coerce.number().describe('X coordinate (pixels from left)'),
-    y: z.coerce.number().describe('Y coordinate (pixels from top)'),
+  server.tool('ui_mouse_click', 'Click at specific x,y coordinates on the TradingView window. CDP expects CSS pixels — if you read coordinates off a screenshot at devicePixelRatio>1, set coords_are="screenshot_pixels" so the values get divided by DPR before clicking.', {
+    x: z.coerce.number().describe('X coordinate'),
+    y: z.coerce.number().describe('Y coordinate'),
     button: z.enum(['left', 'right', 'middle']).optional().describe('Mouse button (default left)'),
     double_click: z.coerce.boolean().optional().describe('Double click (default false)'),
-  }, async ({ x, y, button, double_click }) => {
-    try { return jsonResult(await core.mouseClick({ x, y, button, double_click })); }
+    coords_are: z.enum(['css', 'screenshot_pixels']).optional().describe('Coordinate space (default css)'),
+  }, async ({ x, y, button, double_click, coords_are }) => {
+    try { return jsonResult(await core.mouseClick({ x, y, button, double_click, coords_are })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

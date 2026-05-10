@@ -9,13 +9,15 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function captureScreenshot({ region, filename, method } = {}) {
-  mkdirSync(SCREENSHOT_DIR, { recursive: true });
-
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
-  const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
-
+/**
+ * Take a screenshot of the TradingView window.
+ *
+ * Returns either a file path (default), inline base64 data (return_inline),
+ * or both (return_inline=true also writes the file). Always includes viewport
+ * + devicePixelRatio so coordinates from the screenshot can be mapped back to
+ * CSS pixels for ui_mouse_click(coords_are: "screenshot_pixels").
+ */
+export async function captureScreenshot({ region, filename, method, return_inline } = {}) {
   if (method === 'api') {
     try {
       const colPath = await getChartCollection();
@@ -57,14 +59,44 @@ export async function captureScreenshot({ region, filename, method } = {}) {
     if (bounds) clip = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, scale: 1 };
   }
 
+  // Always read viewport + DPR so vision callers can map screenshot pixels → CSS coords
+  const viewportInfo = await evaluate(`
+    (function() {
+      return {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1
+      };
+    })()
+  `);
+
   const params = { format: 'png' };
   if (clip) params.clip = clip;
-
   const { data } = await client.Page.captureScreenshot(params);
-  writeFileSync(filePath, Buffer.from(data, 'base64'));
+  const bytes = Buffer.from(data, 'base64').length;
 
-  return {
-    success: true, method: 'cdp', file_path: filePath, region,
-    size_bytes: Buffer.from(data, 'base64').length,
+  // Write to disk by default (preserves backwards compatibility). Skip the
+  // disk write when caller explicitly only wants inline content — keeps
+  // vision-heavy workflows from filling up the screenshots/ directory.
+  let filePath = null;
+  if (!return_inline || filename) {
+    mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_');
+    filePath = join(SCREENSHOT_DIR, `${fname}.png`);
+    writeFileSync(filePath, Buffer.from(data, 'base64'));
+  }
+
+  const result = {
+    success: true,
+    method: 'cdp',
+    region: region || 'full',
+    size_bytes: bytes,
+    viewport: viewportInfo,
   };
+  if (filePath) result.file_path = filePath;
+  if (return_inline) {
+    result._inline_image = { mimeType: 'image/png', data };
+  }
+  return result;
 }
