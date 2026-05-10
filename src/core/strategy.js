@@ -284,6 +284,57 @@ export async function getRiskRatios({ entity_id, _deps } = {}) {
   return { success: true, entity_id: strat.entity_id, metrics };
 }
 
+/**
+ * Walks the active strategy's property tree (depth ≤ 5) for any property
+ * whose key contains "deepbacktest" / "deep_backtest" / "useDeepBacktest" and
+ * calls setValue(enable). Same defensive pattern as Epic #1's barMagnifierToggle.
+ */
+export async function deepBacktestToggle({ enable = true, entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const strat = await findStrategyById(entity_id, { _deps });
+  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+
+  const apiPath = await getChartApi();
+  const ok = await evaluate(`
+    (function() {
+      try {
+        var api = ${apiPath};
+        var sources = api._chartWidget.model().model().dataSources();
+        var target = null;
+        for (var i = 0; i < sources.length; i++) {
+          if (sources[i].id && sources[i].id() === ${safeString(strat.entity_id)}) {
+            target = sources[i];
+            break;
+          }
+        }
+        if (!target || !target.properties) return false;
+        function walk(node, depth) {
+          if (depth > 5 || !node) return false;
+          try {
+            var c = (typeof node.childs === 'function') ? node.childs() : null;
+            if (!c) return false;
+            var ks = Object.keys(c);
+            for (var j = 0; j < ks.length; j++) {
+              var k = ks[j];
+              var lk = k.toLowerCase();
+              if (lk.indexOf('deepbacktest') !== -1 || lk.indexOf('deep_backtest') !== -1 || lk.indexOf('usedeepbacktest') !== -1) {
+                try { c[k].setValue(${enable ? 'true' : 'false'}); return true; } catch(e) {}
+              }
+              if (walk(c[k], depth + 1)) return true;
+            }
+          } catch(e) {}
+          return false;
+        }
+        return walk(target.properties(), 0);
+      } catch(e) { return false; }
+    })()
+  `);
+  if (!ok) {
+    return { success: false, error: 'Deep Backtest property not found in this TV version. Toggle manually if needed.' };
+  }
+  return { success: true, enabled: !!enable, entity_id: strat.entity_id };
+}
+
 export async function setSettings({ entity_id, settings, _deps } = {}) {
   if (!settings || typeof settings !== 'object' || Object.keys(settings).length === 0) {
     throw new Error('setSettings: provide at least one setting to update');

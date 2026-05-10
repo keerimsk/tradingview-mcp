@@ -272,3 +272,32 @@ describe('getRiskRatios', () => {
     assert.equal(r.metrics.sharpe_ratio, 1.5);
   });
 });
+
+import { deepBacktestToggle } from '../src/core/strategy.js';
+
+describe('deepBacktestToggle', () => {
+  it('returns success with enabled=true when toggled on', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('setValue')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      // Property-tree walk: returns true (found and set)
+      return true;
+    };
+    const r = await deepBacktestToggle({ enable: true, _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, true);
+    assert.equal(r.enabled, true);
+  });
+
+  it('returns clear error when property not found', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('setValue')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return false;
+    };
+    const r = await deepBacktestToggle({ enable: true, _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, false);
+    assert.match(r.error, /Deep Backtest property not found/i);
+  });
+});
