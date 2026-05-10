@@ -63,19 +63,25 @@ export async function findStrategyById(entity_id, { _deps } = {}) {
   return list.find(s => s.entity_id === entity_id) || null;
 }
 
-// Canonical name → TV-internal property path. CONTROLLER: update these from
-// Phase 0.1 probe results. `null` means the canonical setting could not be
-// located in this TV version — getSettings/setSettings will skip it gracefully.
+// Canonical name → TV-internal property path.
+// LIVE-VERIFIED 2026-05-10: TradingView Desktop Ultimate does NOT expose
+// strategy backtest properties (capital/commission/slippage/pyramiding/margin)
+// via study.properties() or reportData.settings — they live exclusively in
+// TV's Strategy Tester UI Properties dialog and are not CDP-accessible.
+// reportData.settings only contains dateRange (backtest period). Keys below
+// remain as best-guess placeholders for the case where a future TV update or
+// broker integration exposes them; getSettings will return empty + a list of
+// raw_property_keys for debug.
 export const CANONICAL_TO_TV_PATH = {
-  initial_capital:   'initial_capital',     // PROBE-PENDING
-  default_qty_type:  'default_qty_type',    // PROBE-PENDING
-  default_qty_value: 'default_qty_value',   // PROBE-PENDING
-  commission_type:   'commission_type',     // PROBE-PENDING
-  commission_value:  'commission_value',    // PROBE-PENDING
-  slippage:          'slippage',            // PROBE-PENDING
-  pyramiding:        'pyramiding',          // PROBE-PENDING
-  margin_long:       'margin_long',         // PROBE-PENDING
-  margin_short:      'margin_short',        // PROBE-PENDING
+  initial_capital:   'initial_capital',     // TV-UI-ONLY
+  default_qty_type:  'default_qty_type',    // TV-UI-ONLY
+  default_qty_value: 'default_qty_value',   // TV-UI-ONLY
+  commission_type:   'commission_type',     // TV-UI-ONLY
+  commission_value:  'commission_value',    // TV-UI-ONLY
+  slippage:          'slippage',            // TV-UI-ONLY
+  pyramiding:        'pyramiding',          // TV-UI-ONLY
+  margin_long:       'margin_long',         // TV-UI-ONLY
+  margin_short:      'margin_short',        // TV-UI-ONLY
 };
 
 /**
@@ -440,11 +446,13 @@ export async function setSettings({ entity_id, settings, _deps } = {}) {
  */
 export async function setActive({ entity_id, _deps } = {}) {
   const { evaluate, getChartApi } = _resolve(_deps);
-  const strat = await findStrategyById(entity_id, { _deps });
-  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
-  if (entity_id && strat.entity_id !== entity_id) {
-    return { success: false, error: 'Strategy ' + entity_id + ' not found on chart.' };
-  }
+  // setActive needs to distinguish "no strategies on chart" from "specific
+  // entity_id not found". findStrategyById collapses both cases to null —
+  // probe explicitly to give a useful error.
+  const list = await findStrategies({ _deps });
+  if (list.length === 0) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+  const strat = entity_id ? list.find(s => s.entity_id === entity_id) : list[0];
+  if (!strat) return { success: false, error: 'Strategy ' + entity_id + ' not found on chart.' };
 
   const apiPath = await getChartApi();
   const result = await evaluate(`
