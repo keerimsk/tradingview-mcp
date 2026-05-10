@@ -256,6 +256,34 @@ export async function getTradesAnalysis({ entity_id, _deps } = {}) {
   return { success: true, entity_id: strat.entity_id, metrics };
 }
 
+// ---------------------------------------------------------------------------
+// RISK_FIELD_MAP — canonical name → TV reportData field name
+// CONTROLLER: replace right-hand TV field names from Phase 0.1 probe.
+// ---------------------------------------------------------------------------
+export const RISK_FIELD_MAP = {
+  sharpe_ratio:     'sharpeRatio',          // PROBE-PENDING
+  sortino_ratio:    'sortinoRatio',         // PROBE-PENDING
+  profit_factor:    'profitFactor',         // PROBE-PENDING
+  calmar_ratio:     'calmarRatio',          // PROBE-PENDING
+  recovery_factor:  'recoveryFactor',       // PROBE-PENDING
+  max_drawdown:     'maxDrawdown',          // PROBE-PENDING (also in summary)
+  max_drawdown_pct: 'maxDrawdownPercent',   // PROBE-PENDING
+};
+
+export function extractRiskRatios(reportData) {
+  return _coerceFromMap(reportData, RISK_FIELD_MAP);
+}
+
+export async function getRiskRatios({ entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const strat = await findStrategyById(entity_id, { _deps });
+  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+  const data = await _readReportData(strat, evaluate, getChartApi);
+  if (!data) return { success: false, error: 'Strategy ' + strat.entity_id + ' not found.' };
+  const metrics = extractRiskRatios(data.raw);
+  return { success: true, entity_id: strat.entity_id, metrics };
+}
+
 export async function setSettings({ entity_id, settings, _deps } = {}) {
   if (!settings || typeof settings !== 'object' || Object.keys(settings).length === 0) {
     throw new Error('setSettings: provide at least one setting to update');

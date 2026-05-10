@@ -5,6 +5,7 @@ import { getSettings, parseSettingsTree, CANONICAL_TO_TV_PATH } from '../src/cor
 import { setSettings } from '../src/core/strategy.js';
 import { getPerformanceSummary, extractPerformanceSummary, REPORT_FIELD_MAP } from '../src/core/strategy.js';
 import { getTradesAnalysis, extractTradesAnalysis, TRADES_FIELD_MAP } from '../src/core/strategy.js';
+import { getRiskRatios, extractRiskRatios, RISK_FIELD_MAP } from '../src/core/strategy.js';
 
 describe('findStrategies', () => {
   it('returns strategies on chart', async () => {
@@ -238,5 +239,36 @@ describe('getTradesAnalysis', () => {
     assert.equal(r.success, true);
     assert.equal(r.metrics.avg_trade, 50);
     assert.equal(r.metrics.max_consecutive_wins, 4);
+  });
+});
+
+describe('extractRiskRatios', () => {
+  it('normalizes risk-ratio fields', () => {
+    const fakeReport = {
+      sharpeRatio: 1.42,
+      sortinoRatio: 2.01,
+      profitFactor: 2.11,
+      calmarRatio: 0.85,
+      recoveryFactor: 3.04,
+      maxDrawdown: -456.78,
+      maxDrawdownPercent: -4.57,
+    };
+    const r = extractRiskRatios(fakeReport);
+    assert.equal(r.sharpe_ratio, 1.42);
+    assert.equal(r.profit_factor, 2.11);
+  });
+});
+
+describe('getRiskRatios', () => {
+  it('returns risk metrics', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('reportData')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return { raw: { sharpeRatio: 1.5, profitFactor: 2.0 } };
+    };
+    const r = await getRiskRatios({ _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, true);
+    assert.equal(r.metrics.sharpe_ratio, 1.5);
   });
 });
