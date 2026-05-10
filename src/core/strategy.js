@@ -401,3 +401,41 @@ export async function setSettings({ entity_id, settings, _deps } = {}) {
     skipped: allSkipped,
   };
 }
+
+/**
+ * Set which strategy the Strategy Tester displays (when chart has multiple).
+ * TradingView's API for this is uncertain — we try a few candidates and report
+ * `not supported` if none work.
+ */
+export async function setActive({ entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const strat = await findStrategyById(entity_id, { _deps });
+  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+  if (entity_id && strat.entity_id !== entity_id) {
+    return { success: false, error: 'Strategy ' + entity_id + ' not found on chart.' };
+  }
+
+  const apiPath = await getChartApi();
+  const result = await evaluate(`
+    (function() {
+      try {
+        var api = ${apiPath};
+        var widget = api._chartWidget;
+        var id = ${safeString(strat.entity_id)};
+        if (typeof api.setActiveStudy === 'function') { api.setActiveStudy(id); return 'ok'; }
+        if (widget && typeof widget.setActiveStudy === 'function') { widget.setActiveStudy(id); return 'ok'; }
+        var model = widget && widget.model();
+        if (model && typeof model.setActiveStudy === 'function') { model.setActiveStudy(id); return 'ok'; }
+        return 'no_api';
+      } catch(e) { return 'no_api'; }
+    })()
+  `);
+
+  if (result === 'ok') {
+    return { success: true, active_entity_id: strat.entity_id };
+  }
+  return {
+    success: false,
+    error: 'Active-strategy selection not supported in this TV version. Tester shows the most recent strategy automatically.',
+  };
+}

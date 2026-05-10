@@ -301,3 +301,38 @@ describe('deepBacktestToggle', () => {
     assert.match(r.error, /Deep Backtest property not found/i);
   });
 });
+
+import { setActive } from '../src/core/strategy.js';
+
+describe('setActive', () => {
+  it('returns success when underlying API succeeds', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('setActiveStudy')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }, { id: 'st_Y', name: 'MACD', is_strategy: true }];
+      }
+      return 'ok';
+    };
+    const r = await setActive({ entity_id: 'st_Y', _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, true);
+    assert.equal(r.active_entity_id, 'st_Y');
+  });
+
+  it('returns documented error when API not supported', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('setActiveStudy')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return 'no_api';
+    };
+    const r = await setActive({ entity_id: 'st_X', _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, false);
+    assert.match(r.error, /not supported in this TV version/i);
+  });
+
+  it('errors when entity_id not on chart', async () => {
+    const fakeEvaluate = async () => [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+    const r = await setActive({ entity_id: 'st_BOGUS', _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, false);
+    assert.match(r.error, /No strategy on chart|not found/i);
+  });
+});
