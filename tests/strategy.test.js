@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { findStrategies, findStrategyById } from '../src/core/strategy.js';
 import { getSettings, parseSettingsTree, CANONICAL_TO_TV_PATH } from '../src/core/strategy.js';
+import { setSettings } from '../src/core/strategy.js';
 
 describe('findStrategies', () => {
   it('returns strategies on chart', async () => {
@@ -112,5 +113,48 @@ describe('getSettings', () => {
     const r = await getSettings({ _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
     assert.equal(r.success, false);
     assert.match(r.error, /No strategy on chart/i);
+  });
+});
+
+describe('setSettings', () => {
+  it('applies partial settings + returns applied/skipped lists', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('setValue')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return { applied: { commission_value: 0.1 }, skipped: [] };
+    };
+    const r = await setSettings({
+      entity_id: 'st_X',
+      settings: { commission_value: 0.1 },
+      _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' },
+    });
+    assert.equal(r.success, true);
+    assert.equal(r.entity_id, 'st_X');
+    assert.deepEqual(r.applied, { commission_value: 0.1 });
+    assert.deepEqual(r.skipped, []);
+  });
+
+  it('reports skipped settings for unmapped canonical names', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('setValue')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return { applied: {}, skipped: ['margin_long'] };
+    };
+    const r = await setSettings({
+      entity_id: 'st_X',
+      settings: { margin_long: 50 },
+      _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' },
+    });
+    assert.equal(r.success, true);
+    assert.deepEqual(r.skipped, ['margin_long']);
+  });
+
+  it('rejects empty settings object', async () => {
+    await assert.rejects(
+      () => setSettings({ settings: {} }),
+      /at least one setting/i,
+    );
   });
 });

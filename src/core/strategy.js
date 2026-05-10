@@ -152,3 +152,70 @@ export async function getSettings({ entity_id, _deps } = {}) {
     raw_property_keys: result.raw_property_keys,
   };
 }
+
+export async function setSettings({ entity_id, settings, _deps } = {}) {
+  if (!settings || typeof settings !== 'object' || Object.keys(settings).length === 0) {
+    throw new Error('setSettings: provide at least one setting to update');
+  }
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const strat = await findStrategyById(entity_id, { _deps });
+  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+
+  const apiPath = await getChartApi();
+  const writes = [];
+  const skipped = [];
+  for (const [canonical, value] of Object.entries(settings)) {
+    const tvPath = CANONICAL_TO_TV_PATH[canonical];
+    if (!tvPath) skipped.push(canonical);
+    else writes.push({ canonical, tvPath, value });
+  }
+
+  if (writes.length === 0) {
+    return { success: true, entity_id: strat.entity_id, applied: {}, skipped };
+  }
+
+  const result = await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var widget = api._chartWidget;
+      var sources = widget.model().model().dataSources();
+      var writes = ${JSON.stringify(writes)};
+      var applied = {};
+      var skipped_runtime = [];
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
+        if (s.id && s.id() === ${safeString(strat.entity_id)}) {
+          if (!s.properties) return { applied: {}, skipped: writes.map(function(w){return w.canonical;}) };
+          var node = s.properties();
+          var childs = (typeof node.childs === 'function') ? node.childs() : null;
+          if (!childs) return { applied: {}, skipped: writes.map(function(w){return w.canonical;}) };
+          for (var w = 0; w < writes.length; w++) {
+            var write = writes[w];
+            var child = childs[write.tvPath];
+            if (!child || typeof child.setValue !== 'function') {
+              skipped_runtime.push(write.canonical);
+              continue;
+            }
+            try {
+              child.setValue(write.value);
+              applied[write.canonical] = write.value;
+            } catch(e) {
+              skipped_runtime.push(write.canonical);
+            }
+          }
+          return { applied: applied, skipped: skipped_runtime };
+        }
+      }
+      return null;
+    })()
+  `);
+
+  if (!result) return { success: false, error: `Strategy ${strat.entity_id} not found.` };
+  const allSkipped = [...skipped, ...(result.skipped || [])];
+  return {
+    success: true,
+    entity_id: strat.entity_id,
+    applied: result.applied || {},
+    skipped: allSkipped,
+  };
+}
