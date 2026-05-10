@@ -4,6 +4,7 @@ import { findStrategies, findStrategyById } from '../src/core/strategy.js';
 import { getSettings, parseSettingsTree, CANONICAL_TO_TV_PATH } from '../src/core/strategy.js';
 import { setSettings } from '../src/core/strategy.js';
 import { getPerformanceSummary, extractPerformanceSummary, REPORT_FIELD_MAP } from '../src/core/strategy.js';
+import { getTradesAnalysis, extractTradesAnalysis, TRADES_FIELD_MAP } from '../src/core/strategy.js';
 
 describe('findStrategies', () => {
   it('returns strategies on chart', async () => {
@@ -201,5 +202,41 @@ describe('getPerformanceSummary', () => {
     assert.equal(r.success, true);
     assert.equal(r.metrics.net_profit, 500);
     assert.equal(r.metrics.total_trades, 10);
+  });
+});
+
+describe('extractTradesAnalysis', () => {
+  it('normalizes TV trades-analysis fields', () => {
+    const fakeReport = {
+      avgTrade: 29.4,
+      avgWinningTrade: 93.8,
+      avgLosingTrade: -65.3,
+      ratioAvgWinAvgLoss: 1.44,
+      largestWinningTrade: 425.0,
+      largestLosingTrade: -250.5,
+      maxConsecutiveWins: 6,
+      maxConsecutiveLosses: 4,
+      avgBarsInWinningTrade: 12.3,
+      avgBarsInLosingTrade: 8.7,
+    };
+    const r = extractTradesAnalysis(fakeReport);
+    assert.equal(r.avg_trade, 29.4);
+    assert.equal(r.max_consecutive_wins, 6);
+    assert.equal(r.avg_bars_in_winning_trade, 12.3);
+  });
+});
+
+describe('getTradesAnalysis', () => {
+  it('returns trades-analysis metrics', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('reportData')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return { raw: { avgTrade: 50, maxConsecutiveWins: 4 } };
+    };
+    const r = await getTradesAnalysis({ _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, true);
+    assert.equal(r.metrics.avg_trade, 50);
+    assert.equal(r.metrics.max_consecutive_wins, 4);
   });
 });

@@ -225,6 +225,37 @@ export async function getPerformanceSummary({ entity_id, _deps } = {}) {
   return { success: true, entity_id: strat.entity_id, metrics };
 }
 
+// ---------------------------------------------------------------------------
+// TRADES_FIELD_MAP — canonical name → TV reportData field name
+// CONTROLLER: replace right-hand TV field names from Phase 0.1 probe.
+// ---------------------------------------------------------------------------
+export const TRADES_FIELD_MAP = {
+  avg_trade:                 'avgTrade',                // PROBE-PENDING
+  avg_winning_trade:         'avgWinningTrade',         // PROBE-PENDING
+  avg_losing_trade:          'avgLosingTrade',          // PROBE-PENDING
+  ratio_avg_win_loss:        'ratioAvgWinAvgLoss',      // PROBE-PENDING
+  largest_winning_trade:     'largestWinningTrade',     // PROBE-PENDING
+  largest_losing_trade:      'largestLosingTrade',      // PROBE-PENDING
+  max_consecutive_wins:      'maxConsecutiveWins',      // PROBE-PENDING
+  max_consecutive_losses:    'maxConsecutiveLosses',    // PROBE-PENDING
+  avg_bars_in_winning_trade: 'avgBarsInWinningTrade',   // PROBE-PENDING
+  avg_bars_in_losing_trade:  'avgBarsInLosingTrade',    // PROBE-PENDING
+};
+
+export function extractTradesAnalysis(reportData) {
+  return _coerceFromMap(reportData, TRADES_FIELD_MAP);
+}
+
+export async function getTradesAnalysis({ entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const strat = await findStrategyById(entity_id, { _deps });
+  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+  const data = await _readReportData(strat, evaluate, getChartApi);
+  if (!data) return { success: false, error: 'Strategy ' + strat.entity_id + ' not found.' };
+  const metrics = extractTradesAnalysis(data.raw);
+  return { success: true, entity_id: strat.entity_id, metrics };
+}
+
 export async function setSettings({ entity_id, settings, _deps } = {}) {
   if (!settings || typeof settings !== 'object' || Object.keys(settings).length === 0) {
     throw new Error('setSettings: provide at least one setting to update');
