@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { findStrategies, findStrategyById } from '../src/core/strategy.js';
 import { getSettings, parseSettingsTree, CANONICAL_TO_TV_PATH } from '../src/core/strategy.js';
 import { setSettings } from '../src/core/strategy.js';
+import { getPerformanceSummary, extractPerformanceSummary, REPORT_FIELD_MAP } from '../src/core/strategy.js';
 
 describe('findStrategies', () => {
   it('returns strategies on chart', async () => {
@@ -156,5 +157,49 @@ describe('setSettings', () => {
       () => setSettings({ settings: {} }),
       /at least one setting/i,
     );
+  });
+});
+
+describe('extractPerformanceSummary', () => {
+  it('normalizes TV reportData fields to canonical names', () => {
+    const fakeReport = {
+      netProfit: 1234.56,
+      netProfitPercent: 12.35,
+      grossProfit: 2345.0,
+      grossLoss: -1110.4,
+      totalTrades: 42,
+      winningTrades: 25,
+      losingTrades: 17,
+      maxDrawdown: -456.78,
+      maxDrawdownPercent: -4.57,
+      buyHoldReturn: 234.5,
+      buyHoldReturnPercent: 2.35,
+    };
+    const r = extractPerformanceSummary(fakeReport);
+    assert.equal(r.net_profit, 1234.56);
+    assert.equal(r.total_trades, 42);
+    assert.equal(r.percent_profitable, '59.52%');
+    assert.equal(r.max_drawdown, -456.78);
+  });
+
+  it('omits fields missing in source', () => {
+    const r = extractPerformanceSummary({ netProfit: 100 });
+    assert.equal(r.net_profit, 100);
+    assert.equal(r.total_trades, undefined);
+  });
+});
+
+describe('getPerformanceSummary', () => {
+  it('returns metrics for a strategy', async () => {
+    const fakeEvaluate = async (expr) => {
+      if (expr.includes('dataSources') && !expr.includes('reportData')) {
+        return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
+      }
+      return { raw: { netProfit: 500, totalTrades: 10, winningTrades: 6 } };
+    };
+    const r = await getPerformanceSummary({ _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
+    assert.equal(r.success, true);
+    assert.equal(r.metrics.net_profit, 500);
+    assert.equal(r.metrics.total_trades, 10);
   });
 });

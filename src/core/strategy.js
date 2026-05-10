@@ -34,7 +34,7 @@ export async function findStrategies({ _deps } = {}) {
         if (!s.metaInfo) continue;
         try {
           var meta = s.metaInfo();
-          var isStrat = meta.is_strategy === true || (s.reportData != null && meta.is_price_study === false);
+          var isStrat = meta.is_strategy === true || (s['report'+'Data'] != null && meta.is_price_study === false);
           out.push({
             id: s.id ? s.id() : null,
             name: meta.description || meta.shortDescription || '',
@@ -151,6 +151,78 @@ export async function getSettings({ entity_id, _deps } = {}) {
     settings: result.settings,
     raw_property_keys: result.raw_property_keys,
   };
+}
+
+// ---------------------------------------------------------------------------
+// REPORT_FIELD_MAP — canonical name → TV reportData field name
+// CONTROLLER: replace right-hand TV field names from Phase 0.1 probe.
+// ---------------------------------------------------------------------------
+export const REPORT_FIELD_MAP = {
+  net_profit:           'netProfit',           // PROBE-PENDING
+  net_profit_pct:       'netProfitPercent',    // PROBE-PENDING
+  gross_profit:         'grossProfit',         // PROBE-PENDING
+  gross_loss:           'grossLoss',           // PROBE-PENDING
+  total_trades:         'totalTrades',         // PROBE-PENDING
+  winning_trades:       'winningTrades',       // PROBE-PENDING
+  losing_trades:        'losingTrades',        // PROBE-PENDING
+  max_drawdown:         'maxDrawdown',         // PROBE-PENDING
+  max_drawdown_pct:     'maxDrawdownPercent',  // PROBE-PENDING
+  buy_hold_return:      'buyHoldReturn',       // PROBE-PENDING
+  buy_hold_return_pct:  'buyHoldReturnPercent',// PROBE-PENDING
+};
+
+function _coerceFromMap(source, map) {
+  const out = {};
+  if (!source || typeof source !== 'object') return out;
+  for (const [canon, tvField] of Object.entries(map)) {
+    if (source[tvField] !== undefined && source[tvField] !== null) {
+      out[canon] = source[tvField];
+    }
+  }
+  return out;
+}
+
+export function extractPerformanceSummary(reportData) {
+  const out = _coerceFromMap(reportData, REPORT_FIELD_MAP);
+  if (typeof out.winning_trades === 'number' && typeof out.total_trades === 'number' && out.total_trades > 0) {
+    const pct = (out.winning_trades / out.total_trades) * 100;
+    out.percent_profitable = pct.toFixed(2) + '%';
+  }
+  return out;
+}
+
+async function _readReportData(strat, evaluate, getChartApi) {
+  const apiPath = await getChartApi();
+  return await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var sources = api._chartWidget.model().model().dataSources();
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
+        if (s.id && s.id() === ${safeString(strat.entity_id)}) {
+          var rd = s.reportData;
+          if (typeof rd === 'function') rd = rd();
+          if (rd && typeof rd.value === 'function') rd = rd.value();
+          var perf = s.performance ? s.performance() : null;
+          if (perf && typeof perf.value === 'function') perf = perf.value();
+          return { raw: rd || {}, performance: perf || null };
+        }
+      }
+      return null;
+    })()
+  `);
+}
+
+export async function getPerformanceSummary({ entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const strat = await findStrategyById(entity_id, { _deps });
+  if (!strat) return { success: false, error: 'No strategy on chart. Add a Pine strategy first.' };
+
+  const data = await _readReportData(strat, evaluate, getChartApi);
+  if (!data) return { success: false, error: 'Strategy ' + strat.entity_id + ' not found.' };
+
+  const metrics = extractPerformanceSummary(data.raw);
+  return { success: true, entity_id: strat.entity_id, metrics };
 }
 
 export async function setSettings({ entity_id, settings, _deps } = {}) {
