@@ -16,6 +16,7 @@ import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
 import { registerPremiumChartTools } from './tools/premium_chart.js';
 import { registerTickTools } from './tools/ticks.js';
+import { registerStrategyTools } from './tools/strategy.js';
 
 const server = new McpServer(
   {
@@ -24,7 +25,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 89 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 97 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -70,6 +71,9 @@ Premium chart types (Ultimate features):
 - footprint_toggle → switch chart type to/from Volume Footprint
 - bar_magnifier_toggle → toggle Bar Magnifier setting
 - data_get_ticks → recent ticks from Time & Sales panel (Premium/Ultimate)
+- strategy_list / strategy_get_settings / strategy_set_settings → manage strategy properties
+- strategy_get_performance_summary / strategy_get_trades_analysis / strategy_get_risk_ratios → read all 3 Strategy Tester tabs
+- strategy_deep_backtest_toggle / strategy_set_active → premium toggles
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
@@ -97,6 +101,7 @@ registerPaneTools(server);
 registerTabTools(server);
 registerPremiumChartTools(server);
 registerTickTools(server);
+registerStrategyTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
