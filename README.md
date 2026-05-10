@@ -221,8 +221,11 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Show me last 50 ticks" | `data_get_ticks` |
 | "Switch to 5-second bars" | `chart_set_timeframe` with `"5S"` |
 | "Get me 10000 daily bars" | `data_get_ohlcv` with `count: 10000` |
+| "What strategies are on the chart?" | `strategy_list` |
+| "Set commission to 0.1% and re-run" | `strategy_set_settings` → `strategy_get_performance_summary` |
+| "What's my Sharpe ratio?" | `strategy_get_risk_ratios` |
 
-## Tool Reference (89 MCP tools)
+## Tool Reference (97 MCP tools)
 
 ### Chart Reading
 
@@ -333,6 +336,18 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 |------|-------------|
 | `data_get_ticks` | Read recent tick prints from Time & Sales panel (price, size, side, time). Requires panel to be openable. |
 
+### Strategy Tester (deep control)
+
+| Tool | What it does |
+|------|-------------|
+| `strategy_list` | List strategies on chart `[{entity_id, name}]` |
+| `strategy_get_settings` / `strategy_set_settings` | Read/write strategy properties (capital, commission, slippage, pyramiding, margin) |
+| `strategy_deep_backtest_toggle` | Toggle Deep Backtest mode (Premium/Ultimate) |
+| `strategy_get_performance_summary` | Performance tab metrics (net profit, drawdown, win rate) |
+| `strategy_get_trades_analysis` | Trades Analysis tab (avg win/loss, max consec wins, etc.) |
+| `strategy_get_risk_ratios` | Risk Ratios (Sharpe, Sortino, Profit Factor, Calmar) |
+| `strategy_set_active` | Pick active strategy when multiple on chart |
+
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
@@ -375,7 +390,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (89 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (97 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
