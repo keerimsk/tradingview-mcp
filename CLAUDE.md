@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-89 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+97 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -114,6 +114,24 @@ If chart_set_timeframe returns `success: false` with "Symbol does not support", 
 
 `data_get_ohlcv` with `count: 10000` (or up to 40,000) — the tool transparently triggers TradingView to load older bars if the chart cache has fewer than requested. Returns `partial: true` with `requested` / `returned` if loading times out.
 
+### "Manage / read strategy backtest"
+
+**Discover:**
+- `strategy_list` → returns `[{entity_id, name}]` for every strategy on chart
+
+**Read:**
+- `strategy_get_settings` → current settings (capital, commission, slippage, pyramiding)
+- `strategy_get_performance_summary` → net profit, drawdown, win rate
+- `strategy_get_trades_analysis` → avg win/loss, max consecutive wins
+- `strategy_get_risk_ratios` → Sharpe, Sortino, Profit Factor
+
+**Tune:**
+- `strategy_set_settings { settings: { commission_value: 0.1 } }` → partial update
+- `strategy_deep_backtest_toggle { enable: true }` → Premium feature, more accurate per-bar backtest
+- `strategy_set_active { entity_id }` → pick active strategy on multi-strategy chart
+
+**Pre-condition:** A Pine strategy must be on chart. If `strategy_list` returns empty, instruct the user to add one (Indicators → Built-ins → Strategies).
+
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading
 - `ui_click` → click buttons by aria-label, text, or data-name
@@ -155,6 +173,9 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `patterns_list` | ~1-3 KB |
 | `data_get_ticks` (50 ticks) | ~3-5 KB |
 | `data_get_ohlcv` (10000 bars) | ~800 KB — use `summary: true` instead unless raw bars needed |
+| `strategy_list` | ~200 B per strategy |
+| `strategy_get_settings` | ~500 B (incl. raw_property_keys) |
+| `strategy_get_performance_summary` / `_trades_analysis` / `_risk_ratios` | ~500 B each |
 
 ## Tool Conventions
 
