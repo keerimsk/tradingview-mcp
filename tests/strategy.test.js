@@ -163,25 +163,28 @@ describe('setSettings', () => {
 });
 
 describe('extractPerformanceSummary', () => {
-  it('normalizes TV reportData fields to canonical names', () => {
+  it('normalizes TV reportData fields to canonical names (live-verified field names)', () => {
     const fakeReport = {
       netProfit: 1234.56,
       netProfitPercent: 12.35,
       grossProfit: 2345.0,
       grossLoss: -1110.4,
       totalTrades: 42,
-      winningTrades: 25,
-      losingTrades: 17,
-      maxDrawdown: -456.78,
-      maxDrawdownPercent: -4.57,
+      numberOfWiningTrades: 25,        // TV typo "Wining"
+      numberOfLosingTrades: 17,
+      maxStrategyDrawDown: -456.78,
+      maxStrategyDrawDownPercent: -4.57,
       buyHoldReturn: 234.5,
       buyHoldReturnPercent: 2.35,
+      percentProfitable: 59.52,
+      profitFactor: 2.11,
     };
     const r = extractPerformanceSummary(fakeReport);
     assert.equal(r.net_profit, 1234.56);
     assert.equal(r.total_trades, 42);
     assert.equal(r.percent_profitable, '59.52%');
     assert.equal(r.max_drawdown, -456.78);
+    assert.equal(r.profit_factor, 2.11);
   });
 
   it('omits fields missing in source', () => {
@@ -194,10 +197,10 @@ describe('extractPerformanceSummary', () => {
 describe('getPerformanceSummary', () => {
   it('returns metrics for a strategy', async () => {
     const fakeEvaluate = async (expr) => {
-      if (expr.includes('dataSources') && !expr.includes('reportData')) {
+      if (expr.includes('dataSources') && !expr.includes('s.reportData')) {
         return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
       }
-      return { raw: { netProfit: 500, totalTrades: 10, winningTrades: 6 } };
+      return { raw: { netProfit: 500, totalTrades: 10, numberOfWiningTrades: 6, percentProfitable: 60 } };
     };
     const r = await getPerformanceSummary({ _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
     assert.equal(r.success, true);
@@ -207,62 +210,64 @@ describe('getPerformanceSummary', () => {
 });
 
 describe('extractTradesAnalysis', () => {
-  it('normalizes TV trades-analysis fields', () => {
+  it('normalizes TV trades-analysis fields (live-verified field names)', () => {
     const fakeReport = {
       avgTrade: 29.4,
-      avgWinningTrade: 93.8,
-      avgLosingTrade: -65.3,
+      avgWinTrade: 93.8,             // TV uses shortened "Win"
+      avgLosTrade: -65.3,            // and "Los"
       ratioAvgWinAvgLoss: 1.44,
-      largestWinningTrade: 425.0,
-      largestLosingTrade: -250.5,
-      maxConsecutiveWins: 6,
-      maxConsecutiveLosses: 4,
-      avgBarsInWinningTrade: 12.3,
-      avgBarsInLosingTrade: 8.7,
+      largestWinTrade: 425.0,
+      largestLosTrade: -250.5,
+      avgBarsInWinTrade: 12.3,
+      avgBarsInLossTrade: 8.7,       // double-s "Loss"
+      avgBarsInTrade: 10.5,
     };
     const r = extractTradesAnalysis(fakeReport);
     assert.equal(r.avg_trade, 29.4);
-    assert.equal(r.max_consecutive_wins, 6);
+    assert.equal(r.avg_winning_trade, 93.8);
+    assert.equal(r.largest_losing_trade, -250.5);
     assert.equal(r.avg_bars_in_winning_trade, 12.3);
+    assert.equal(r.avg_bars_in_losing_trade, 8.7);
   });
 });
 
 describe('getTradesAnalysis', () => {
   it('returns trades-analysis metrics', async () => {
     const fakeEvaluate = async (expr) => {
-      if (expr.includes('dataSources') && !expr.includes('reportData')) {
+      if (expr.includes('dataSources') && !expr.includes('s.reportData')) {
         return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
       }
-      return { raw: { avgTrade: 50, maxConsecutiveWins: 4 } };
+      return { raw: { avgTrade: 50, avgWinTrade: 80 } };
     };
     const r = await getTradesAnalysis({ _deps: { evaluate: fakeEvaluate, getChartApi: async () => 'x' } });
     assert.equal(r.success, true);
     assert.equal(r.metrics.avg_trade, 50);
-    assert.equal(r.metrics.max_consecutive_wins, 4);
+    assert.equal(r.metrics.avg_winning_trade, 80);
   });
 });
 
 describe('extractRiskRatios', () => {
-  it('normalizes risk-ratio fields', () => {
+  it('normalizes risk-ratio fields (live-verified field names)', () => {
     const fakeReport = {
       sharpeRatio: 1.42,
       sortinoRatio: 2.01,
       profitFactor: 2.11,
-      calmarRatio: 0.85,
-      recoveryFactor: 3.04,
-      maxDrawdown: -456.78,
-      maxDrawdownPercent: -4.57,
+      maxStrategyDrawDown: -456.78,
+      maxStrategyDrawDownPercent: -4.57,
+      maxStrategyRunUp: 800,
+      maxStrategyRunUpPercent: 8.0,
     };
     const r = extractRiskRatios(fakeReport);
     assert.equal(r.sharpe_ratio, 1.42);
     assert.equal(r.profit_factor, 2.11);
+    assert.equal(r.max_runup, 800);
   });
 });
 
 describe('getRiskRatios', () => {
   it('returns risk metrics', async () => {
     const fakeEvaluate = async (expr) => {
-      if (expr.includes('dataSources') && !expr.includes('reportData')) {
+      if (expr.includes('dataSources') && !expr.includes('s.reportData')) {
         return [{ id: 'st_X', name: 'RSI', is_strategy: true }];
       }
       return { raw: { sharpeRatio: 1.5, profitFactor: 2.0 } };

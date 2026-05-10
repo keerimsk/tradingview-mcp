@@ -34,7 +34,9 @@ export async function findStrategies({ _deps } = {}) {
         if (!s.metaInfo) continue;
         try {
           var meta = s.metaInfo();
-          var isStrat = meta.is_strategy === true || (s['report'+'Data'] != null && meta.is_price_study === false);
+          // TV uses isTVScriptStrategy for Pine strategy studies. Strategies may be overlays
+          // (is_price_study true), so don't gate on that. Fallback: presence of report data getter.
+          var isStrat = meta.isTVScriptStrategy === true || meta.is_strategy === true || s['report'+'Data'] != null;
           out.push({
             id: s.id ? s.id() : null,
             name: meta.description || meta.shortDescription || '',
@@ -154,21 +156,22 @@ export async function getSettings({ entity_id, _deps } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// REPORT_FIELD_MAP — canonical name → TV reportData field name
-// CONTROLLER: replace right-hand TV field names from Phase 0.1 probe.
+// REPORT_FIELD_MAP — canonical name → TV reportData field name.
+// Verified live 2026-05-10 against TradingView Desktop Ultimate.
+// Source object is a flatten of reportData.performance + reportData.performance.all.
 // ---------------------------------------------------------------------------
 export const REPORT_FIELD_MAP = {
-  net_profit:           'netProfit',           // PROBE-PENDING
-  net_profit_pct:       'netProfitPercent',    // PROBE-PENDING
-  gross_profit:         'grossProfit',         // PROBE-PENDING
-  gross_loss:           'grossLoss',           // PROBE-PENDING
-  total_trades:         'totalTrades',         // PROBE-PENDING
-  winning_trades:       'winningTrades',       // PROBE-PENDING
-  losing_trades:        'losingTrades',        // PROBE-PENDING
-  max_drawdown:         'maxDrawdown',         // PROBE-PENDING
-  max_drawdown_pct:     'maxDrawdownPercent',  // PROBE-PENDING
-  buy_hold_return:      'buyHoldReturn',       // PROBE-PENDING
-  buy_hold_return_pct:  'buyHoldReturnPercent',// PROBE-PENDING
+  net_profit:           'netProfit',
+  net_profit_pct:       'netProfitPercent',
+  gross_profit:         'grossProfit',
+  gross_loss:           'grossLoss',
+  total_trades:         'totalTrades',
+  winning_trades:       'numberOfWiningTrades',     // TV typo: "Wining"
+  losing_trades:        'numberOfLosingTrades',
+  max_drawdown:         'maxStrategyDrawDown',
+  max_drawdown_pct:     'maxStrategyDrawDownPercent',
+  buy_hold_return:      'buyHoldReturn',
+  buy_hold_return_pct:  'buyHoldReturnPercent',
 };
 
 function _coerceFromMap(source, map) {
@@ -184,15 +187,29 @@ function _coerceFromMap(source, map) {
 
 export function extractPerformanceSummary(reportData) {
   const out = _coerceFromMap(reportData, REPORT_FIELD_MAP);
-  if (typeof out.winning_trades === 'number' && typeof out.total_trades === 'number' && out.total_trades > 0) {
+  // TV's percentProfitable is a ratio (0..1), not a percent. Multiply by 100 when formatting.
+  if (typeof reportData?.percentProfitable === 'number') {
+    const v = reportData.percentProfitable;
+    const pct = v >= 0 && v <= 1 ? v * 100 : v;
+    out.percent_profitable = pct.toFixed(2) + '%';
+  } else if (typeof out.winning_trades === 'number' && typeof out.total_trades === 'number' && out.total_trades > 0) {
     const pct = (out.winning_trades / out.total_trades) * 100;
     out.percent_profitable = pct.toFixed(2) + '%';
+  }
+  if (typeof reportData?.profitFactor === 'number') {
+    out.profit_factor = reportData.profitFactor;
   }
   return out;
 }
 
 async function _readReportData(strat, evaluate, getChartApi) {
   const apiPath = await getChartApi();
+  // CRITICAL: must call s.reportData() with `this` bound to s. Assigning
+  // `var rd = s.reportData; rd()` strips the binding and TV throws on internal
+  // _reportData access. Use `s.reportData()` directly.
+  // TV nests metrics: rd.performance.{sharpeRatio, sortinoRatio, maxStrategyDrawDown, ...}
+  // and rd.performance.all.{netProfit, totalTrades, percentProfitable, profitFactor, ...}.
+  // We flatten perf + perf.all into one source object so the FIELD_MAPs can use flat keys.
   return await evaluate(`
     (function() {
       var api = ${apiPath};
@@ -200,12 +217,20 @@ async function _readReportData(strat, evaluate, getChartApi) {
       for (var i = 0; i < sources.length; i++) {
         var s = sources[i];
         if (s.id && s.id() === ${safeString(strat.entity_id)}) {
-          var rd = s.reportData;
-          if (typeof rd === 'function') rd = rd();
-          if (rd && typeof rd.value === 'function') rd = rd.value();
-          var perf = s.performance ? s.performance() : null;
-          if (perf && typeof perf.value === 'function') perf = perf.value();
-          return { raw: rd || {}, performance: perf || null };
+          var rd = null;
+          try { rd = s.reportData(); } catch(e) { rd = null; }
+          if (rd && typeof rd.value === 'function') {
+            try { rd = rd.value(); } catch(e) {}
+          }
+          var perf = (rd && rd.performance) || {};
+          var all = (perf && perf.all) || {};
+          // Flatten: perf.all wins on key clash with perf (more specific wins)
+          var flat = {};
+          for (var k in perf) { if (typeof perf[k] !== 'object' || perf[k] === null) flat[k] = perf[k]; }
+          for (var k2 in all) flat[k2] = all[k2];
+          // Pass settings (e.g., dateRange) through too
+          var settings = (rd && rd.settings) || {};
+          return { raw: flat, settings: settings, currency: rd && rd.currency };
         }
       }
       return null;
@@ -226,20 +251,25 @@ export async function getPerformanceSummary({ entity_id, _deps } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// TRADES_FIELD_MAP — canonical name → TV reportData field name
-// CONTROLLER: replace right-hand TV field names from Phase 0.1 probe.
+// TRADES_FIELD_MAP — canonical name → TV reportData field name.
+// Verified live 2026-05-10. TV uses shortened "WinTrade"/"LosTrade" names.
+// max_consecutive_wins/losses not present in TV's perf.all object — omitted.
 // ---------------------------------------------------------------------------
 export const TRADES_FIELD_MAP = {
-  avg_trade:                 'avgTrade',                // PROBE-PENDING
-  avg_winning_trade:         'avgWinningTrade',         // PROBE-PENDING
-  avg_losing_trade:          'avgLosingTrade',          // PROBE-PENDING
-  ratio_avg_win_loss:        'ratioAvgWinAvgLoss',      // PROBE-PENDING
-  largest_winning_trade:     'largestWinningTrade',     // PROBE-PENDING
-  largest_losing_trade:      'largestLosingTrade',      // PROBE-PENDING
-  max_consecutive_wins:      'maxConsecutiveWins',      // PROBE-PENDING
-  max_consecutive_losses:    'maxConsecutiveLosses',    // PROBE-PENDING
-  avg_bars_in_winning_trade: 'avgBarsInWinningTrade',   // PROBE-PENDING
-  avg_bars_in_losing_trade:  'avgBarsInLosingTrade',    // PROBE-PENDING
+  avg_trade:                 'avgTrade',
+  avg_trade_pct:             'avgTradePercent',
+  avg_winning_trade:         'avgWinTrade',
+  avg_winning_trade_pct:     'avgWinTradePercent',
+  avg_losing_trade:          'avgLosTrade',
+  avg_losing_trade_pct:      'avgLosTradePercent',
+  ratio_avg_win_loss:        'ratioAvgWinAvgLoss',
+  largest_winning_trade:     'largestWinTrade',
+  largest_winning_trade_pct: 'largestWinTradePercent',
+  largest_losing_trade:      'largestLosTrade',
+  largest_losing_trade_pct:  'largestLosTradePercent',
+  avg_bars_in_winning_trade: 'avgBarsInWinTrade',
+  avg_bars_in_losing_trade:  'avgBarsInLossTrade',     // TV typo: "Loss" with double s
+  avg_bars_in_trade:         'avgBarsInTrade',
 };
 
 export function extractTradesAnalysis(reportData) {
@@ -257,17 +287,18 @@ export async function getTradesAnalysis({ entity_id, _deps } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// RISK_FIELD_MAP — canonical name → TV reportData field name
-// CONTROLLER: replace right-hand TV field names from Phase 0.1 probe.
+// RISK_FIELD_MAP — canonical name → TV reportData field name.
+// Verified live 2026-05-10. calmar_ratio + recovery_factor not exposed by TV
+// in its perf object (would need to be computed). Omitted for now.
 // ---------------------------------------------------------------------------
 export const RISK_FIELD_MAP = {
-  sharpe_ratio:     'sharpeRatio',          // PROBE-PENDING
-  sortino_ratio:    'sortinoRatio',         // PROBE-PENDING
-  profit_factor:    'profitFactor',         // PROBE-PENDING
-  calmar_ratio:     'calmarRatio',          // PROBE-PENDING
-  recovery_factor:  'recoveryFactor',       // PROBE-PENDING
-  max_drawdown:     'maxDrawdown',          // PROBE-PENDING (also in summary)
-  max_drawdown_pct: 'maxDrawdownPercent',   // PROBE-PENDING
+  sharpe_ratio:     'sharpeRatio',
+  sortino_ratio:    'sortinoRatio',
+  profit_factor:    'profitFactor',
+  max_drawdown:     'maxStrategyDrawDown',
+  max_drawdown_pct: 'maxStrategyDrawDownPercent',
+  max_runup:        'maxStrategyRunUp',
+  max_runup_pct:    'maxStrategyRunUpPercent',
 };
 
 export function extractRiskRatios(reportData) {
