@@ -115,15 +115,19 @@ For Volume Profile (`vp_*`) and TPO (`tpo_*`) tools, install the Pine helper ind
 - **Harmonic Patterns** — `patterns_add --kinds harmonic` uses an unverified scriptIdPart guess. May fail until probed live.
 - **`VolumeFootprint` chart type** — works on Premium/Ultimate (ID 17). On lower-tier plans `footprint_toggle --enable true` will silently fail.
 
-## Tick Data (Premium / Ultimate plans)
+## Tick Data (`data_get_ticks`)
 
-For `data_get_ticks` to work, TradingView's Time & Sales panel must be available. On Premium/Ultimate plans this panel is included; on lower tiers it may be locked.
+**Status: experimental — broker integration required.** Live probe (2026-05-10, Ultimate plan) confirmed that TradingView Desktop's "Time & Sales" widget is NOT a standalone panel in the standard chart UI. It appears only when a broker integration is connected via the Trading panel; without one, the widget never renders and `data_get_ticks` returns:
 
-**One-time:** open the Time & Sales panel from TradingView's right sidebar (look for the bid/ask/last icon). The MCP server attempts auto-open before each call but will return `{success:false, error:"Time & Sales panel could not be opened"}` if the click fails.
+```json
+{ "success": false, "error": "Time & Sales panel could not be opened. Open it manually and retry." }
+```
 
-**Sub-minute resolutions** (`chart_set_timeframe` with `"1S"`, `"5S"`, `"30S"`) require the symbol to support seconds-based intervals. Crypto exchanges (BINANCE, COINBASE) generally do; equities and forex usually do not.
+This is the expected behavior in setups without a connected broker. The tool's selectors are best-guess placeholders that can be updated live if/when a panel matching them appears (future TV update or specific broker integration).
 
-**40,000-bar history** is fetched lazily — `data_get_ohlcv` with high `count` triggers TradingView to load older data. Some symbols may have shorter histories; in that case the tool returns `partial: true` with `returned < requested`.
+**Sub-minute resolutions** (`chart_set_timeframe` with `"1S"`, `"5S"`, `"30S"`) work on Premium/Ultimate. Verified: crypto symbols (BINANCE:BTCUSDT) accept seconds; equities (NASDAQ:AAPL) also accept seconds on Premium/Ultimate. Lower-tier plans likely return `success:false` with "Symbol does not support".
+
+**40,000-bar history** is fetched best-effort. `data_get_ohlcv` with high `count` triggers TradingView to load older data via known internal APIs (`requestMoreBars` / `requestMoreData`). When TV does not respond to any of these or runs out of history, the tool returns `partial: true` with `requested` and `returned` fields so the LLM agent can adapt. Verified live: BTCUSDT daily returns `{partial: true, requested: 10000, returned: 348}` because chart cache is the bottleneck.
 
 ## Troubleshooting
 

@@ -1,10 +1,18 @@
 /**
  * Read recent tick prints from TradingView's Time & Sales panel.
  *
- * IMPORTANT — selectors below are placeholders. The controller must replace
- * them with values discovered from a live probe (see plan Phase 3.0/6.2).
- * If the panel selector does not match in production, getTicks returns a
- * clear error directing the user to open Time & Sales manually.
+ * KNOWN LIMITATION (verified 2026-05-10 against TradingView Desktop on Ultimate
+ * plan): TradingView's "Time & Sales" widget is not exposed as a standalone
+ * panel in the standard chart UI — broad DOM probe found no tape/trades widget
+ * on the right sidebar or bottom tab bar. The widget appears to be gated
+ * behind broker integration (Trading panel → broker connection → tape feed).
+ * Without a connected broker this tool returns
+ * `{success:false, error:"Time & Sales panel could not be opened"}`.
+ *
+ * Selectors below remain as best-guess placeholders for two future cases:
+ * 1) A future TradingView update exposes T&S as a regular standalone panel
+ * 2) A broker integration provides a panel matching these selectors
+ * Replace the constants live if either case occurs.
  */
 import {
   evaluate as _evaluate,

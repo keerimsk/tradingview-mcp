@@ -59,6 +59,15 @@ export async function setSymbol({ symbol, _deps }) {
 
 const TIMEFRAME_REGEX = /^(\d+S|\d+|D|W|M)$/;
 
+// TV normalizes "D"/"W"/"M" to "1D"/"1W"/"1M" internally (and accepts both forms
+// as inputs). Treat them as equivalent for post-call verification.
+function _normalizeInterval(tf) {
+  if (tf === 'D') return '1D';
+  if (tf === 'W') return '1W';
+  if (tf === 'M') return '1M';
+  return tf;
+}
+
 export async function setTimeframe({ timeframe, _deps }) {
   const { evaluate, waitForChartReady, getInterval } = _resolve(_deps);
   if (typeof timeframe !== 'string' || !TIMEFRAME_REGEX.test(timeframe)) {
@@ -73,7 +82,7 @@ export async function setTimeframe({ timeframe, _deps }) {
   const ready = await waitForChartReady(null, timeframe);
   // Post-call verification — TV silently keeps old resolution if symbol does not support it.
   const actual = await getInterval();
-  if (actual && actual !== timeframe) {
+  if (actual && _normalizeInterval(actual) !== _normalizeInterval(timeframe)) {
     return {
       success: false,
       requested: timeframe,
