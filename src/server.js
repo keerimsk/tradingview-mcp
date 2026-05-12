@@ -22,6 +22,7 @@ import { registerScreenTools } from './tools/screen.js';
 import { registerScreenerTools } from './tools/screener.js';
 import { registerPineScreenerTools } from './tools/pine_screener.js';
 import { registerNewsTools } from './tools/news.js';
+import { registerDomTools } from './tools/dom.js';
 
 const server = new McpServer(
   {
@@ -112,6 +113,7 @@ registerScreenTools(server);
 registerScreenerTools(server);
 registerPineScreenerTools(server);
 registerNewsTools(server);
+registerDomTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

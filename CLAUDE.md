@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-116 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+117 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -141,6 +141,13 @@ If table scraping fails, the result includes `fallback.file_path` to an annotate
 - `bar_magnifier_toggle { enable: true }` → Bar Magnifier setting
 
 **Important:** `vp_get`/`tpo_get` require the helper to be installed first. If they error with "TV-MCP Helper not found", call `premium_install_helper` once.
+
+### "Read DOM (Depth of Market / Piyasa Derinliği) ladder"
+
+1. **Pre-condition:** Connect a live broker (TradeStation, IBKR, AMP, OANDA — Paper Trading does NOT support DOM) and select "DOM" mode in the bottom-left Trade button.
+2. `dom_read depth:20` → returns `{best_bid, best_ask, spread, total_bid_size, total_ask_size, asks:[{price,size}], bids:[{price,size}]}` sorted best-first.
+
+If panel not visible: returns `{success:false, panel_open:false, error:"DOM panel not visible..."}` with guidance.
 
 ### "Read recent tick prints"
 

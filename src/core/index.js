@@ -19,3 +19,4 @@ export * as screen from './screen.js';
 export * as screener from './screener.js';
 export * as pineScreener from './pine_screener.js';
 export * as news from './news.js';
+export * as dom from './dom.js';

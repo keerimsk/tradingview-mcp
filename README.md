@@ -236,8 +236,9 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Click that button on screen" (when DOM fails) | `ui_screen_inspect` → `ui_mouse_click coords_are:"screenshot_pixels"` |
 | "Save my Pine indicator without overwriting old one" | `pine_new` → `pine_set_source` → `pine_smart_compile` (strict-by-default refuses to overwrite) |
 | "Dismiss this 'Save changes?' dialog" | `ui_dialog action:"click_button" intent:"discard"` |
+| "Read the DOM ladder" | `dom_read depth:20` (DOM panel must be open in TV first) |
 
-## Tool Reference (116 MCP tools)
+## Tool Reference (117 MCP tools)
 
 ### Chart Reading
 
@@ -347,6 +348,12 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | What it does |
 |------|-------------|
 | `data_get_ticks` | Read recent tick prints from Time & Sales panel (price, size, side, time). Requires panel to be openable. |
+
+### DOM / Depth of Market (Premium / Ultimate + broker)
+
+| Tool | What it does |
+|------|-------------|
+| `dom_read depth:20` | Read the bid/ask ladder. Returns best_bid, best_ask, spread, total_bid_size, total_ask_size, plus per-level `asks[]` (sorted ascending) and `bids[]` (sorted descending). **Pre-condition:** DOM panel must be open in TradingView — requires a real broker connection (Paper Trading does NOT support DOM). Click bottom-left "Trade" button → switch to DOM mode. |
 
 ### Strategy Tester (deep control)
 
@@ -464,7 +471,7 @@ How much of [TradingView Ultimate's feature surface](tradingview-ultimate-featur
 | Drawing tools (shape CRUD) | ✅ 90% |
 | Alerts (price + technical CRUD) | 🟡 50% (no webhooks, no multi-condition, no watchlist alerts) |
 | Watchlists (read + add) | 🟡 40% (no remove, no multi-list, no colors, no import/export) |
-| Live broker trading | ❌ 0% (replay paper trade only) |
+| Live broker trading | 🟡 25% (DOM read via `dom_read` when broker connected; no order placement yet) |
 | Portfolios | ❌ 0% (TV portfolio service not wrapped) |
 | Economic / earnings calendar | ❌ 0% (CORS-blocked endpoints) |
 | Yield curves | 🟡 manual (symbol-based access) |
